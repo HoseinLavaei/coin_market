@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coin-market"
+version = "0.1.0"
+description = "Unified cryptocurrency market data from multiple Iranian exchanges."
+readme = "README.md"
+requires-python = ">=3.14"
+
+authors = [
+    {name = "Hosein Lavaei"}
+]
+
+dependencies = [
+    "requests>=2.34.2",
+    "pydantic>=2.13.4",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
