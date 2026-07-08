@@ -2,7 +2,8 @@
 
 A Python package for getting cryptocurrency market information from Iranian exchanges.
 
-The goal of this project is to provide a simple and unified way to access coin prices and market data from different Iranian cryptocurrency providers.
+The goal of this project is to provide a simple and unified way to access coin prices and market data from different
+Iranian cryptocurrency providers.
 
 ## Features
 
@@ -26,7 +27,7 @@ More providers can be added in the future.
 
 ## Installation
 
-Download the source code, go to the root directory and run: 
+Download the source code, go to the root directory and run:
 
 ```bash
 pip install -e .

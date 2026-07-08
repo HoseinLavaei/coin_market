@@ -1,6 +1,8 @@
-from decimal import Decimal
 import unittest.mock as mock
+from decimal import Decimal
+
 from coin_market.providers.exir import ExirProvider
+
 
 @mock.patch("coin_market.providers.provider_base.Provider.get_json")
 def test_exir(mock_get_json):

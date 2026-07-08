@@ -50,7 +50,7 @@ class Coin(BaseModel):
         def format_decimal(value: Decimal, decimals: int = 2) -> str:
             """Format decimal with thousands separators and specified decimal places."""
             return f"{value:,.{decimals}f}"
-        
+
         # Currency symbols
         currency_symbols = {
             "USD": "$",
@@ -95,7 +95,7 @@ class Coins(BaseModel):
     
     Acts as a dictionary with symbol keys for easy access.
     """
-    coins: dict[str, Coin] = Field(default_factory=dict) # the key is f"{provider}:{currency}:{symbol}"
+    coins: dict[str, Coin] = Field(default_factory=dict)  # the key is f"{provider}:{currency}:{symbol}"
 
     @classmethod
     def from_list(cls, data: list[dict]) -> "Coins":
@@ -108,21 +108,20 @@ class Coins(BaseModel):
         return coins
 
     @staticmethod
-    def get_key_from_details(provider:str, currency:str, symbol:str) -> str:
+    def get_key_from_details(provider: str, currency: str, symbol: str) -> str:
         return f"{provider}:{currency}:{symbol}"
 
-    def get(self, provider:str, currency:str, symbol:str) -> Coin:
+    def get(self, provider: str, currency: str, symbol: str) -> Coin:
         """Get a coin by symbol using bracket notation (coins['BTC'])."""
-        return self.coins[Coins.get_key_from_details(provider,currency,symbol)]
+        return self.coins[Coins.get_key_from_details(provider, currency, symbol)]
 
     def upsert(self, coin: Coin) -> None:
         """Add or update a coin in the collection."""
-        self.coins[Coins.get_key_from_details(coin.provider,coin.currency,coin.symbol)] = coin
+        self.coins[Coins.get_key_from_details(coin.provider, coin.currency, coin.symbol)] = coin
 
-    def remove(self, provider:str, currency:str, symbol:str) -> None:
+    def remove(self, provider: str, currency: str, symbol: str) -> None:
         """Remove a coin from the collection by symbol."""
-        del self.coins[Coins.get_key_from_details(provider,currency,symbol)]
-
+        del self.coins[Coins.get_key_from_details(provider, currency, symbol)]
 
     def sorted_by_rank(self) -> list[Coin]:
         """Return coins sorted by rank (ascending), with None values last."""
@@ -139,9 +138,9 @@ class Coins(BaseModel):
             reverse=True
         )
 
-    def contains(self, provider:str, currency:str, symbol:str) -> bool:
+    def contains(self, provider: str, currency: str, symbol: str) -> bool:
         """Check if a coin symbol exists in the collection."""
-        return Coins.get_key_from_details(provider,currency,symbol) in self.coins
+        return Coins.get_key_from_details(provider, currency, symbol) in self.coins
 
     def __len__(self) -> int:
         """Return the number of coins in the collection."""

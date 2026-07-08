@@ -2,6 +2,7 @@ from decimal import Decimal
 import unittest.mock as mock
 from coin_market.providers.bitpin import BitpinProvider
 
+
 @mock.patch("coin_market.providers.provider_base.Provider.get_json")
 def test_bitpin(mock_get_json):
     mock_get_json.return_value = {

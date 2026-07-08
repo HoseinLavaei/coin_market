@@ -1,6 +1,7 @@
 from .provider_base import Provider
 from ..coin import Coins
 
+
 class AbanTetherProvider(Provider):
     """AbanTether exchange API provider.
 
@@ -11,10 +12,10 @@ class AbanTetherProvider(Provider):
     URL = "https://api.abantether.com/api/v1/manager/otc/ticker"
     SUPPORTED_CURRENCIES = {"IRT"}
 
-    def get_params(self, currency:str) -> dict[str, str] | None:
+    def get_params(self, currency: str) -> dict[str, str] | None:
         return None
 
-    def _fetch(self, currency: str, json:dict) -> Coins:
+    def _fetch(self, currency: str, json: dict) -> Coins:
         markets = json["data"]["markets"]
 
         coins_data = []

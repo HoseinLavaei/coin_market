@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from ..coin import Coins
 from .provider_base import Provider
+from ..coin import Coins
 
 
 class ExirProvider(Provider):
@@ -49,9 +49,9 @@ class ExirProvider(Provider):
 
                 if open_decimal != 0:
                     change = (
-                        (last_decimal - open_decimal)
-                        / open_decimal
-                        * Decimal("100")
+                            (last_decimal - open_decimal)
+                            / open_decimal
+                            * Decimal("100")
                     )
 
             coins_data.append({

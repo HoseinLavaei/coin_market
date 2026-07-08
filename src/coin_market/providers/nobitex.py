@@ -1,6 +1,7 @@
 from .provider_base import Provider
 from ..coin import Coins
 
+
 class NobitexProvider(Provider):
     """Nobitex exchange API provider for Iranian cryptocurrency market.
 
@@ -8,7 +9,7 @@ class NobitexProvider(Provider):
     """
     NAME = "Nobitex"
     URL = "https://apiv2.nobitex.ir/market/stats"
-    SUPPORTED_CURRENCIES = {"RLS","USDT",}
+    SUPPORTED_CURRENCIES = {"RLS", "USDT", }
     SUPPORTED_SYMBOLS = (
         "btc",
         "eth",

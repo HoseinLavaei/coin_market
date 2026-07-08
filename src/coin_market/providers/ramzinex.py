@@ -1,5 +1,5 @@
-from ..coin import Coins
 from .provider_base import Provider
+from ..coin import Coins
 
 
 class RamzinexProvider(Provider):

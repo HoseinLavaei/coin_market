@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
-from requests import Session
-from ..coin import Coins
+
 import requests
+from requests import Session
+
+from ..coin import Coins
+
 
 class Provider(ABC):
     """Abstract base class for cryptocurrency data providers."""
@@ -35,7 +38,7 @@ class Provider(ABC):
             raise RuntimeError(f"{self.NAME} API error: {e}") from e
 
     @abstractmethod
-    def get_params(self, currency:str) -> dict[str, str] | None:
+    def get_params(self, currency: str) -> dict[str, str] | None:
         return None
 
     def fetch(self, currency: str) -> Coins:
@@ -49,7 +52,7 @@ class Provider(ABC):
         return self._fetch(currency, self.get_json(currency))
 
     @abstractmethod
-    def _fetch(self, currency: str, json:dict) -> Coins:
+    def _fetch(self, currency: str, json: dict) -> Coins:
         """Fetch coin data for the given currency.
 
         Each provider is responsible for:

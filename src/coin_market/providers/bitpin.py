@@ -1,5 +1,6 @@
-from ..coin import Coins
 from .provider_base import Provider
+from ..coin import Coins
+
 
 class BitpinProvider(Provider):
     """Bitpin API provider for cryptocurrency market data.
@@ -12,7 +13,7 @@ class BitpinProvider(Provider):
     URL = "https://api.bitpin.ir/v1/mkt/markets/"
     SUPPORTED_CURRENCIES = {"IRT", "USDT"}
 
-    def get_params(self, currency:str) -> dict[str, str] | None:
+    def get_params(self, currency: str) -> dict[str, str] | None:
         return None
 
     def _fetch(self, currency: str, json: dict) -> Coins:

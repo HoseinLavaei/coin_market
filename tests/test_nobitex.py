@@ -1,6 +1,8 @@
-from decimal import Decimal
 import unittest.mock as mock
+from decimal import Decimal
+
 from coin_market.providers.nobitex import NobitexProvider
+
 
 @mock.patch("coin_market.providers.provider_base.Provider.get_json")
 def test_nobitex(mock_get_json):

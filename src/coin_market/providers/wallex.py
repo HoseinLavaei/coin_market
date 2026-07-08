@@ -1,5 +1,6 @@
-from ..coin import Coins
 from .provider_base import Provider
+from ..coin import Coins
+
 
 class WallexProvider(Provider):
     """Wallex API provider."""
@@ -8,7 +9,7 @@ class WallexProvider(Provider):
     URL = "https://api.wallex.ir/v1/markets"
     SUPPORTED_CURRENCIES = {"TMN", "USDT"}
 
-    def get_params(self, currency:str) -> dict[str, str] | None:
+    def get_params(self, currency: str) -> dict[str, str] | None:
         return None
 
     def _fetch(self, currency: str, json: dict) -> Coins:
