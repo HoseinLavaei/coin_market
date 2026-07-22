@@ -1,8 +1,9 @@
 import unittest.mock as mock
 from decimal import Decimal
+
+from coin_market import AbanTetherProvider
 from coin_market.coin import Currency
 from coin_market.coin import ProviderName
-from coin_market import AbanTetherProvider
 
 
 @mock.patch("coin_market.providers.aban_tether.get_json")

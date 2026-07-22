@@ -1,17 +1,19 @@
 from .provider_base import get_json
 from ..coin import Coins, Currency, ProviderName
 
+
 def optional(value):
     if value in (None, "", "-"):
         return None
     return value
+
 
 class RamzinexProvider:
     """Ramzinex API provider."""
 
     @staticmethod
     def fetch(currency: Currency) -> Coins:
-        json = get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs", None)
+        json = get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
 
         if json.get("status") != 0:
             raise RuntimeError("Ramzinex returned an invalid response.")

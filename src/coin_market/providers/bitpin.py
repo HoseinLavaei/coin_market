@@ -19,7 +19,7 @@ class BitpinProvider:
         Returns:
             Coins collection with market data.
         """
-        json = get_json("https://api.bitpin.ir/v1/mkt/markets/",None)
+        json = get_json("https://api.bitpin.ir/v1/mkt/markets/")
 
         markets = json.get("results", [])
 

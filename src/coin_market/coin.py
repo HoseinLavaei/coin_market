@@ -1,6 +1,7 @@
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Iterator
+
 from pydantic import BaseModel, Field
 
 
@@ -15,6 +16,7 @@ class ProviderName(Enum):
     def __str__(self) -> str:
         return self.name
 
+
 class Currency(Enum):
     RLS = 0
     USD = 1
@@ -22,6 +24,7 @@ class Currency(Enum):
 
     def __str__(self) -> str:
         return self.name
+
     def get_symbol(self) -> str:
         match self:
             case self.RLS:

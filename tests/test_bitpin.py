@@ -1,8 +1,9 @@
-from decimal import Decimal
 import unittest.mock as mock
-from coin_market.providers.bitpin import BitpinProvider
+from decimal import Decimal
+
 from coin_market.coin import Currency
 from coin_market.coin import ProviderName
+from coin_market.providers.bitpin import BitpinProvider
 
 
 @mock.patch("coin_market.providers.bitpin.get_json")

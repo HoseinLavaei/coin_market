@@ -7,6 +7,7 @@ def _optional(value):
         return None
     return value
 
+
 class WallexProvider:
     """Wallex API provider."""
 
@@ -14,7 +15,7 @@ class WallexProvider:
 
     @staticmethod
     def fetch(currency: Currency) -> Coins:
-        json = get_json("https://api.wallex.ir/v1/markets", None)
+        json = get_json("https://api.wallex.ir/v1/markets")
 
         symbols = json.get("result", {}).get("symbols", {})
 
@@ -42,7 +43,7 @@ class WallexProvider:
 
             coins_data.append({
                 "symbol": market["baseAsset"].upper(),
-                "current_price": stats["lastPrice"]*multiplier,
+                "current_price": stats["lastPrice"] * multiplier,
                 "currency": currency,
                 "provider": ProviderName.WALLEX,
             })

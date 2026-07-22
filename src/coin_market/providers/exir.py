@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from .provider_base import get_json
 from ..coin import Coins, Currency, ProviderName
 
@@ -9,13 +7,14 @@ def optional(value):
         return None
     return value
 
+
 class ExirProvider:
     """Exir exchange API provider."""
 
     @staticmethod
     def fetch(currency: Currency) -> Coins:
         coins_data = []
-        json = get_json("https://api.exir.io/v2/tickers", None)
+        json = get_json("https://api.exir.io/v2/tickers")
         for pair, ticker in json.items():
             if "-" not in pair:
                 continue
@@ -46,4 +45,3 @@ class ExirProvider:
             })
 
         return Coins.from_list(coins_data)
-

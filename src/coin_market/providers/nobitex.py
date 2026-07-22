@@ -12,9 +12,10 @@ def get_params(currency: Currency) -> dict[str, str]:
         case _:
             raise ValueError(f"Unsupported currency: {currency}")
     return {
-        "srcCurrency": ",".join(("btc","eth","ltc","usdt","bnb","xrp",)),
+        "srcCurrency": ",".join(("btc", "eth", "ltc", "usdt", "bnb", "xrp",)),
         "dstCurrency": currency_string,
     }
+
 
 class NobitexProvider:
     """Nobitex exchange API provider for Iranian cryptocurrency market.
