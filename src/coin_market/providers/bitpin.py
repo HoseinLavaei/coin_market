@@ -1,51 +1,46 @@
-from .provider_base import Provider
-from ..coin import Coins
+from .provider_base import get_json
+from ..coin import Coins, Currency, ProviderName
 
 
-class BitpinProvider(Provider):
+class BitpinProvider:
     """Bitpin API provider for cryptocurrency market data.
 
     Fetches market data for trading pairs. Bitpin does not provide market cap,
     circulating supply, or rank information.
     """
 
-    NAME = "Bitpin"
-    URL = "https://api.bitpin.ir/v1/mkt/markets/"
-    SUPPORTED_CURRENCIES = {"IRT", "USDT"}
-
-    def get_params(self, currency: str) -> dict[str, str] | None:
-        return None
-
-    def _fetch(self, currency: str, json: dict) -> Coins:
+    @staticmethod
+    def fetch(currency: Currency) -> Coins:
         """Fetch coin data from the Bitpin API.
 
         Args:
             currency: Quote currency ("IRT" or "USDT").
-            json: Parsed JSON response from the Bitpin API.
 
         Returns:
             Coins collection with market data.
         """
+        json = get_json("https://api.bitpin.ir/v1/mkt/markets/",None)
 
         markets = json.get("results", [])
 
+        currency_string = ""
+        match currency:
+            case Currency.RLS:
+                currency_string = "IRT"
+            case Currency.USD:
+                currency_string = "USDT"
+            case _:
+                raise ValueError(f"Unsupported currency: {currency}")
+
         coins_data = [
             {
-                "name": market["currency1"]["title"],
                 "symbol": market["currency1"]["code"].upper(),
                 "current_price": market["price"],
-                "price_change_24h": market["price_info"]["change"],
-                "high_24h": market["price_info"]["max"],
-                "low_24h": market["price_info"]["min"],
-                "market_cap": None,
-                "volume_24h": market["price_info"]["value"],
-                "circulating_supply": None,
-                "rank": None,
                 "currency": currency,
-                "provider": self.NAME,
+                "provider": ProviderName.BITPIN,
             }
             for market in markets
-            if market["currency2"]["code"].upper() == currency
+            if market["currency2"]["code"].upper() == currency_string
         ]
 
         return Coins.from_list(coins_data)

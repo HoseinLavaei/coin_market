@@ -4,7 +4,7 @@ from decimal import Decimal
 from coin_market.providers.wallex import WallexProvider
 
 
-@mock.patch("coin_market.providers.provider_base.Provider.get_json")
+@mock.patch("coin_market.providers.wallex.get_json")
 def test_wallex(mock_get_json):
     mock_get_json.return_value = {
         "result": {
@@ -25,11 +25,11 @@ def test_wallex(mock_get_json):
         }
     }
     provider = WallexProvider()
-    coins = provider.fetch("USDT")
-    assert coins.contains("Wallex", "USDT", "BTC")
-    btc = coins.get("Wallex", "USDT", "BTC")
+    from coin_market.coin import Currency
+    coins = provider.fetch(Currency.USD)
+    from coin_market.coin import ProviderName
+    assert coins.contains(ProviderName.WALLEX, Currency.USD, "BTC")
+    btc = coins.get(ProviderName.WALLEX, Currency.USD, "BTC")
     assert btc.symbol == "BTC"
     assert isinstance(btc.current_price, Decimal)
     assert btc.current_price > 0
-    assert isinstance(btc.price_change_24h, Decimal)
-    assert btc.price_change_24h == Decimal("1.2")

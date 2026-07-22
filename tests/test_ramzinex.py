@@ -4,7 +4,7 @@ from decimal import Decimal
 from coin_market.providers.ramzinex import RamzinexProvider
 
 
-@mock.patch("coin_market.providers.provider_base.Provider.get_json")
+@mock.patch("coin_market.providers.ramzinex.get_json")
 def test_ramzinex(mock_get_json):
     mock_get_json.return_value = {
         "status": 0,
@@ -25,11 +25,11 @@ def test_ramzinex(mock_get_json):
         ]
     }
     provider = RamzinexProvider()
-    coins = provider.fetch("irr")
-    assert coins.contains("Ramzinex", "irr", "BTC")
-    btc = coins.get("Ramzinex", "irr", "BTC")
+    from coin_market.coin import Currency
+    coins = provider.fetch(Currency.RLS)
+    from coin_market.coin import ProviderName
+    assert coins.contains(ProviderName.RAMZINEX, Currency.RLS, "BTC")
+    btc = coins.get(ProviderName.RAMZINEX, Currency.RLS, "BTC")
     assert btc.symbol == "BTC"
     assert isinstance(btc.current_price, Decimal)
     assert btc.current_price > 0
-    assert isinstance(btc.price_change_24h, Decimal)
-    assert btc.price_change_24h == Decimal("2.5")

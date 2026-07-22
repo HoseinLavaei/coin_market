@@ -1,31 +1,30 @@
-from .provider_base import Provider
-from ..coin import Coins
+from .provider_base import get_json
+from ..coin import Coins, Currency, ProviderName
 
 
-class NobitexProvider(Provider):
+def get_params(currency: Currency) -> dict[str, str]:
+    currency_string = ""
+    match currency:
+        case Currency.RLS:
+            currency_string = "rls"
+        case Currency.USD:
+            currency_string = "usdt"
+        case _:
+            raise ValueError(f"Unsupported currency: {currency}")
+    return {
+        "srcCurrency": ",".join(("btc","eth","ltc","usdt","bnb","xrp",)),
+        "dstCurrency": currency_string,
+    }
+
+class NobitexProvider:
     """Nobitex exchange API provider for Iranian cryptocurrency market.
 
     Supports Iranian Rial (RLS) as quote currency.
     """
-    NAME = "Nobitex"
-    URL = "https://apiv2.nobitex.ir/market/stats"
-    SUPPORTED_CURRENCIES = {"RLS", "USDT", }
-    SUPPORTED_SYMBOLS = (
-        "btc",
-        "eth",
-        "ltc",
-        "usdt",
-        "bnb",
-        "xrp",
-    )
 
-    def get_params(self, currency: str) -> dict[str, str]:
-        return {
-            "srcCurrency": ",".join(self.SUPPORTED_SYMBOLS),
-            "dstCurrency": currency.lower(),
-        }
-
-    def _fetch(self, currency: str, json: dict) -> Coins:
+    @staticmethod
+    def fetch(currency: Currency) -> Coins:
+        json = get_json("https://apiv2.nobitex.ir/market/stats", get_params(currency))
         if json.get("status") != "ok":
             raise RuntimeError("Nobitex returned an invalid response.")
 
@@ -36,18 +35,10 @@ class NobitexProvider(Provider):
             symbol = market_key.split("-")[0].upper()
 
             coins_data.append({
-                "name": symbol,
                 "symbol": symbol,
                 "current_price": market_data["latest"],
-                "price_change_24h": market_data["dayChange"],
-                "high_24h": market_data["dayHigh"],
-                "low_24h": market_data["dayLow"],
-                "market_cap": None,
-                "volume_24h": market_data["volumeDst"],
-                "circulating_supply": None,
-                "rank": None,
                 "currency": currency,
-                "provider": self.NAME,
+                "provider": ProviderName.NOBITEX,
             })
 
         return Coins.from_list(coins_data)

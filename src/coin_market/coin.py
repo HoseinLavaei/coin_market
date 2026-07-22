@@ -1,7 +1,35 @@
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Iterator
-
 from pydantic import BaseModel, Field
+
+
+class ProviderName(Enum):
+    ABAN_TETHER = "ABAN_TETHER"
+    BITPIN = "BITPIN"
+    EXIR = "EXIR"
+    NOBITEX = "NOBITEX"
+    RAMZINEX = "RAMZINEX"
+    WALLEX = "WALLEX"
+
+    def __str__(self) -> str:
+        return self.name
+
+class Currency(Enum):
+    RLS = 0
+    USD = 1
+    EUR = 2
+
+    def __str__(self) -> str:
+        return self.name
+    def get_symbol(self) -> str:
+        match self:
+            case self.RLS:
+                return "RIAL"
+            case self.USD:
+                return "$"
+            case self.EUR:
+                return "€"
 
 
 def sort_key_with_nulls(value: Any, fallback: Any) -> tuple[int, Any]:
@@ -17,77 +45,15 @@ class Coin(BaseModel):
     
     Frozen model to ensure immutability after creation.
     """
-    name: str
     symbol: str
     current_price: Decimal
-    price_change_24h: Decimal | None = None
-    high_24h: Decimal | None = None
-    low_24h: Decimal | None = None
-    market_cap: Decimal | None = None
-    volume_24h: Decimal | None = None
-    circulating_supply: Decimal | None = None
-    rank: int | None = None
-    currency: str
-    provider: str
+    currency: Currency
+    provider: ProviderName
 
     model_config = {"frozen": True}
 
-    @property
-    def is_gaining(self) -> bool:
-        """True if the 24h price change is positive."""
-        if self.price_change_24h is None:
-            raise ValueError("Price change 24h is not available.")
-        return self.price_change_24h > 0
-
-    @property
-    def is_losing(self) -> bool:
-        """True if the 24h price change is negative."""
-        if self.price_change_24h is None:
-            raise ValueError("Price change 24h is not available.")
-        return self.price_change_24h < 0
-
     def __str__(self) -> str:
-        def format_decimal(value: Decimal, decimals: int = 2) -> str:
-            """Format decimal with thousands separators and specified decimal places."""
-            return f"{value:,.{decimals}f}"
-
-        # Currency symbols
-        currency_symbols = {
-            "USD": "$",
-            "EUR": "€",
-            "RLS": "IRT",  # Iranian Rial
-        }
-        symbol = currency_symbols.get(self.currency.upper(), self.currency)
-
-        lines = [
-            f"===== {self.provider} {self.name}/{self.currency} =====",
-            f"Name: {self.name}",
-            f"Symbol: {self.symbol}",
-            f"Current Price: {symbol}{format_decimal(self.current_price)}",
-        ]
-
-        if self.price_change_24h is not None:
-            lines.append(f"24h Change: {format_decimal(self.price_change_24h, 2)}%")
-
-        if self.high_24h is not None:
-            lines.append(f"24h High: {symbol}{format_decimal(self.high_24h)}")
-
-        if self.low_24h is not None:
-            lines.append(f"24h Low: {symbol}{format_decimal(self.low_24h)}")
-
-        if self.market_cap is not None:
-            lines.append(f"Market Cap: {symbol}{format_decimal(self.market_cap, 0)}")
-
-        if self.volume_24h is not None:
-            lines.append(f"24h Volume: {symbol}{format_decimal(self.volume_24h, 0)}")
-
-        if self.circulating_supply is not None:
-            lines.append(f"Circulating Supply: {format_decimal(self.circulating_supply, 0)}")
-
-        if self.rank is not None:
-            lines.append(f"Rank: #{self.rank}")
-
-        return "\n".join(lines)
+        return f"{self.provider}'s {self.symbol} : {self.current_price}{self.currency.get_symbol()}"
 
 
 class Coins(BaseModel):
@@ -108,10 +74,10 @@ class Coins(BaseModel):
         return coins
 
     @staticmethod
-    def get_key_from_details(provider: str, currency: str, symbol: str) -> str:
+    def get_key_from_details(provider: ProviderName, currency: Currency, symbol: str) -> str:
         return f"{provider}:{currency}:{symbol}"
 
-    def get(self, provider: str, currency: str, symbol: str) -> Coin:
+    def get(self, provider: ProviderName, currency: Currency, symbol: str) -> Coin:
         """Get a coin by symbol using bracket notation (coins['BTC'])."""
         return self.coins[Coins.get_key_from_details(provider, currency, symbol)]
 
@@ -119,7 +85,7 @@ class Coins(BaseModel):
         """Add or update a coin in the collection."""
         self.coins[Coins.get_key_from_details(coin.provider, coin.currency, coin.symbol)] = coin
 
-    def remove(self, provider: str, currency: str, symbol: str) -> None:
+    def remove(self, provider: ProviderName, currency: Currency, symbol: str) -> None:
         """Remove a coin from the collection by symbol."""
         del self.coins[Coins.get_key_from_details(provider, currency, symbol)]
 
@@ -138,7 +104,7 @@ class Coins(BaseModel):
             reverse=True
         )
 
-    def contains(self, provider: str, currency: str, symbol: str) -> bool:
+    def contains(self, provider: ProviderName, currency: Currency, symbol: str) -> bool:
         """Check if a coin symbol exists in the collection."""
         return Coins.get_key_from_details(provider, currency, symbol) in self.coins
 

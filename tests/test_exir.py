@@ -4,7 +4,7 @@ from decimal import Decimal
 from coin_market.providers.exir import ExirProvider
 
 
-@mock.patch("coin_market.providers.provider_base.Provider.get_json")
+@mock.patch("coin_market.providers.exir.get_json")
 def test_exir(mock_get_json):
     mock_get_json.return_value = {
         "BTC-IRT": {
@@ -16,12 +16,11 @@ def test_exir(mock_get_json):
         }
     }
     provider = ExirProvider()
-    coins = provider.fetch("IRT")
-    assert coins.contains("Exir", "IRT", "BTC")
-    btc = coins.get("Exir", "IRT", "BTC")
+    from coin_market.coin import Currency
+    coins = provider.fetch(Currency.RLS)
+    from coin_market.coin import ProviderName
+    assert coins.contains(ProviderName.EXIR, Currency.RLS, "BTC")
+    btc = coins.get(ProviderName.EXIR, Currency.RLS, "BTC")
     assert btc.symbol == "BTC"
     assert isinstance(btc.current_price, Decimal)
     assert btc.current_price > 0
-    # (3000000000 - 2900000000) / 2900000000 * 100 = 3.448...
-    assert isinstance(btc.price_change_24h, Decimal)
-    assert btc.price_change_24h > 0
