@@ -33,7 +33,17 @@ class Currency(Enum):
                 return "$"
             case self.EUR:
                 return "€"
-
+    @classmethod
+    def from_symbol(cls, data: str) -> "Currency":
+        match data:
+            case "RIAL":
+                return cls.RLS
+            case "$":
+                return cls.USD
+            case "€":
+                return cls.EUR
+            case _:
+                raise ValueError(f"Invalid currency symbol: {data}")
 
 def sort_key_with_nulls(value: Any, fallback: Any) -> tuple[int, Any]:
     """Returns a sort key tuple that places None values at the end.
@@ -48,15 +58,36 @@ class Coin(BaseModel):
     
     Frozen model to ensure immutability after creation.
     """
+    provider: ProviderName
     symbol: str
     current_price: Decimal
     currency: Currency
-    provider: ProviderName
 
     model_config = {"frozen": True}
 
     def __str__(self) -> str:
         return f"{self.provider}'s {self.symbol} : {self.current_price}{self.currency.get_symbol()}"
+    def __repr__(self) -> str:
+        return f"{self.provider},{self.symbol},{self.current_price},{self.currency.get_symbol()}"
+    @classmethod
+    def from_string(cls, data: str) -> "Coin":
+        parts = data.split(",")
+        if len(parts) != 4:
+            raise ValueError(f"Invalid coin data: {data}")
+
+        provider = ProviderName[parts[0]]
+        symbol = parts[1]
+        current_price = Decimal(parts[2])
+        currency_symbol = parts[3]
+
+        currency = Currency.from_symbol(currency_symbol)
+
+        return cls(
+            provider=provider,
+            symbol=symbol,
+            current_price=current_price,
+            currency=currency
+        )
 
 
 class Coins(BaseModel):
@@ -92,21 +123,6 @@ class Coins(BaseModel):
         """Remove a coin from the collection by symbol."""
         del self.coins[Coins.get_key_from_details(provider, currency, symbol)]
 
-    def sorted_by_rank(self) -> list[Coin]:
-        """Return coins sorted by rank (ascending), with None values last."""
-        return sorted(
-            self,
-            key=lambda c: sort_key_with_nulls(c.rank, 0)
-        )
-
-    def sorted_by_market_cap(self) -> list[Coin]:
-        """Return coins sorted by market cap (descending), with None values last."""
-        return sorted(
-            self,
-            key=lambda c: sort_key_with_nulls(c.market_cap, Decimal(0)),
-            reverse=True
-        )
-
     def contains(self, provider: ProviderName, currency: Currency, symbol: str) -> bool:
         """Check if a coin symbol exists in the collection."""
         return Coins.get_key_from_details(provider, currency, symbol) in self.coins
@@ -114,10 +130,6 @@ class Coins(BaseModel):
     def __len__(self) -> int:
         """Return the number of coins in the collection."""
         return len(self.coins)
-
-    def __iter__(self) -> Iterator[Coin]:
-        """Iterate over all coins in the collection."""
-        return iter(self.coins.values())
 
     def __str__(self) -> str:
         if not self.coins:
@@ -127,5 +139,17 @@ class Coins(BaseModel):
 
         return (
                 f"Number of coins: {len(self)}\n\n"
-                + "\n\n".join(str(coin) for coin in self)
+                + "\n\n".join(str(coin) for coin in self.coins.values())
         )
+    def __repr__(self) -> str:
+        output = ""
+        for coin in self.coins.values():
+            output += f"{coin.__repr__()}\n"
+        return output.strip()
+    @classmethod
+    def from_string(cls, data: str) -> "Coins":
+        lines = data.split("\n")
+        coins = cls()
+        for line in lines:
+            coins.upsert(Coin.from_string(line))
+        return coins
