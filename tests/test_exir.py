@@ -1,6 +1,7 @@
 import unittest.mock as mock
 from decimal import Decimal
-
+from coin_market.coin import Currency
+from coin_market.coin import ProviderName
 from coin_market.providers.exir import ExirProvider
 
 
@@ -16,9 +17,7 @@ def test_exir(mock_get_json):
         }
     }
     provider = ExirProvider()
-    from coin_market.coin import Currency
     coins = provider.fetch(Currency.RLS)
-    from coin_market.coin import ProviderName
     assert coins.contains(ProviderName.EXIR, Currency.RLS, "BTC")
     btc = coins.get(ProviderName.EXIR, Currency.RLS, "BTC")
     assert btc.symbol == "BTC"

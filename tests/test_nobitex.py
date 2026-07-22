@@ -1,6 +1,7 @@
 import unittest.mock as mock
 from decimal import Decimal
-
+from coin_market.coin import Currency
+from coin_market.coin import ProviderName
 from coin_market.providers.nobitex import NobitexProvider
 
 
@@ -19,9 +20,7 @@ def test_nobitex(mock_get_json):
         }
     }
     provider = NobitexProvider()
-    from coin_market.coin import Currency
     coins = provider.fetch(Currency.RLS)
-    from coin_market.coin import ProviderName
     assert coins.contains(ProviderName.NOBITEX, Currency.RLS, "BTC")
     btc = coins.get(ProviderName.NOBITEX, Currency.RLS, "BTC")
     assert btc.symbol == "BTC"

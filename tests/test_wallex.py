@@ -1,6 +1,7 @@
 import unittest.mock as mock
 from decimal import Decimal
-
+from coin_market.coin import Currency
+from coin_market.coin import ProviderName
 from coin_market.providers.wallex import WallexProvider
 
 
@@ -25,9 +26,7 @@ def test_wallex(mock_get_json):
         }
     }
     provider = WallexProvider()
-    from coin_market.coin import Currency
     coins = provider.fetch(Currency.USD)
-    from coin_market.coin import ProviderName
     assert coins.contains(ProviderName.WALLEX, Currency.USD, "BTC")
     btc = coins.get(ProviderName.WALLEX, Currency.USD, "BTC")
     assert btc.symbol == "BTC"

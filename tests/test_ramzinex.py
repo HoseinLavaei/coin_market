@@ -1,6 +1,7 @@
 import unittest.mock as mock
 from decimal import Decimal
-
+from coin_market.coin import Currency
+from coin_market.coin import ProviderName
 from coin_market.providers.ramzinex import RamzinexProvider
 
 
@@ -25,9 +26,7 @@ def test_ramzinex(mock_get_json):
         ]
     }
     provider = RamzinexProvider()
-    from coin_market.coin import Currency
     coins = provider.fetch(Currency.RLS)
-    from coin_market.coin import ProviderName
     assert coins.contains(ProviderName.RAMZINEX, Currency.RLS, "BTC")
     btc = coins.get(ProviderName.RAMZINEX, Currency.RLS, "BTC")
     assert btc.symbol == "BTC"

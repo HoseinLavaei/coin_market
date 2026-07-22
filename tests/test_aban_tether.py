@@ -1,6 +1,7 @@
 import unittest.mock as mock
 from decimal import Decimal
-
+from coin_market.coin import Currency
+from coin_market.coin import ProviderName
 from coin_market import AbanTetherProvider
 
 
@@ -18,9 +19,7 @@ def test_aban_tether(mock_get_json):
         }
     }
     aban_tether = AbanTetherProvider()
-    from coin_market.coin import Currency
     aban_tether_coins = aban_tether.fetch(Currency.RLS)
-    from coin_market.coin import ProviderName
     assert aban_tether_coins.contains(ProviderName.ABAN_TETHER, Currency.RLS, "BTC")
     btc_aban_tether = aban_tether_coins.get(ProviderName.ABAN_TETHER, Currency.RLS, "BTC")
     assert btc_aban_tether.symbol == "BTC"
