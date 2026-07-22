@@ -1,5 +1,5 @@
 from .provider_base import get_json
-from ..coin import Coins, Currency, ProviderName
+from ..coin import Coins, Quote, ProviderName
 
 
 def optional(value):
@@ -12,7 +12,7 @@ class RamzinexProvider:
     """Ramzinex API provider."""
 
     @staticmethod
-    def fetch(currency: Currency) -> Coins:
+    def fetch(quote: Quote) -> Coins:
         json = get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
 
         if json.get("status") != 0:
@@ -21,13 +21,13 @@ class RamzinexProvider:
         coins_data = []
 
         currency_string = ""
-        match currency:
-            case Currency.RLS:
+        match quote:
+            case Quote.RLS:
                 currency_string = "irr"
-            case Currency.USD:
+            case Quote.USD:
                 currency_string = "usdt"
             case _:
-                raise ValueError(f"Unsupported currency: {currency}")
+                raise ValueError(f"Unsupported currency: {quote}")
 
         for market in json["data"]:
             if market["quote_currency_symbol"]["en"] != currency_string:
@@ -41,9 +41,9 @@ class RamzinexProvider:
             symbol = market["base_currency_symbol"]["en"].upper()
 
             coins_data.append({
-                "symbol": symbol,
+                "base": symbol,
                 "current_price": current_price,
-                "currency": currency,
+                "quote": quote,
                 "provider": ProviderName.RAMZINEX,
             })
 

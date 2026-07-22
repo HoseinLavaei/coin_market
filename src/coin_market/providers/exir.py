@@ -1,5 +1,5 @@
 from .provider_base import get_json
-from ..coin import Coins, Currency, ProviderName
+from ..coin import Coins, Quote, ProviderName
 
 
 def optional(value):
@@ -12,25 +12,25 @@ class ExirProvider:
     """Exir exchange API provider."""
 
     @staticmethod
-    def fetch(currency: Currency) -> Coins:
+    def fetch(quote: Quote) -> Coins:
         coins_data = []
         json = get_json("https://api.exir.io/v2/tickers")
         for pair, ticker in json.items():
             if "-" not in pair:
                 continue
 
-            base, quote = pair.split("-", 1)
+            base, received_quote = pair.split("-", 1)
 
             currency_string = ""
-            match currency:
-                case Currency.RLS:
+            match quote:
+                case Quote.RLS:
                     currency_string = "IRT"
-                case Currency.USD:
+                case Quote.USD:
                     currency_string = "USDT"
                 case _:
-                    raise ValueError(f"Unsupported currency: {currency}")
+                    raise ValueError(f"Unsupported currency: {quote}")
 
-            if quote != currency_string:
+            if received_quote != currency_string:
                 continue
 
             last = optional(ticker.get("last"))
@@ -38,9 +38,9 @@ class ExirProvider:
                 continue
 
             coins_data.append({
-                "symbol": base,
+                "base": base,
                 "current_price": last,
-                "currency": currency,
+                "quote": quote,
                 "provider": ProviderName.EXIR,
             })
 

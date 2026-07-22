@@ -1,5 +1,5 @@
 from .provider_base import get_json
-from ..coin import Coins, Currency, ProviderName
+from ..coin import Coins, Quote, ProviderName
 
 
 class AbanTetherProvider:
@@ -9,7 +9,7 @@ class AbanTetherProvider:
     """
 
     @staticmethod
-    def fetch(currency: Currency = Currency.RLS) -> Coins:
+    def fetch(quote: Quote = Quote.RLS) -> Coins:
         json = get_json("https://api.abantether.com/api/v1/manager/otc/ticker")
         markets = json["data"]["markets"]
         coins_data = []
@@ -18,8 +18,8 @@ class AbanTetherProvider:
                 continue
             coins_data.append({
                 "provider": ProviderName.ABAN_TETHER,
-                "currency": currency,
-                "symbol": market["symbol"],
+                "quote": quote,
+                "base": market["symbol"],
                 # AbanTether exposes buy/sell prices.
                 # We use the buy price as the current market price.
                 "current_price": market["buy_price"],

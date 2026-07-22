@@ -1,16 +1,16 @@
 from .provider_base import get_json
-from ..coin import Coins, Currency, ProviderName
+from ..coin import Coins, Quote, ProviderName
 
 
-def get_params(currency: Currency) -> dict[str, str]:
+def get_params(quote: Quote) -> dict[str, str]:
     currency_string = ""
-    match currency:
-        case Currency.RLS:
+    match quote:
+        case Quote.RLS:
             currency_string = "rls"
-        case Currency.USD:
+        case Quote.USD:
             currency_string = "usdt"
         case _:
-            raise ValueError(f"Unsupported currency: {currency}")
+            raise ValueError(f"Unsupported currency: {quote}")
     return {
         "srcCurrency": ",".join(("btc", "eth", "ltc", "usdt", "bnb", "xrp",)),
         "dstCurrency": currency_string,
@@ -24,8 +24,8 @@ class NobitexProvider:
     """
 
     @staticmethod
-    def fetch(currency: Currency) -> Coins:
-        json = get_json("https://apiv2.nobitex.ir/market/stats", get_params(currency))
+    def fetch(quote: Quote) -> Coins:
+        json = get_json("https://apiv2.nobitex.ir/market/stats", get_params(quote))
         if json.get("status") != "ok":
             raise RuntimeError("Nobitex returned an invalid response.")
 
@@ -36,9 +36,9 @@ class NobitexProvider:
             symbol = market_key.split("-")[0].upper()
 
             coins_data.append({
-                "symbol": symbol,
+                "base": symbol,
                 "current_price": market_data["latest"],
-                "currency": currency,
+                "quote": quote,
                 "provider": ProviderName.NOBITEX,
             })
 

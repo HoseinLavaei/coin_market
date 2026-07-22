@@ -1,6 +1,5 @@
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Iterator
 
 from pydantic import BaseModel, Field
 
@@ -17,10 +16,10 @@ class ProviderName(Enum):
         return self.name
 
 
-class Currency(Enum):
-    RLS = 0
-    USD = 1
-    EUR = 2
+class Quote(Enum):
+    RLS = "RLS"
+    USD = "USD"
+    EUR = "EUR"
 
     def __str__(self) -> str:
         return self.name
@@ -34,7 +33,7 @@ class Currency(Enum):
             case self.EUR:
                 return "€"
     @classmethod
-    def from_symbol(cls, data: str) -> "Currency":
+    def from_symbol(cls, data: str) -> "Quote":
         match data:
             case "RIAL":
                 return cls.RLS
@@ -45,30 +44,22 @@ class Currency(Enum):
             case _:
                 raise ValueError(f"Invalid currency symbol: {data}")
 
-def sort_key_with_nulls(value: Any, fallback: Any) -> tuple[int, Any]:
-    """Returns a sort key tuple that places None values at the end.
-    
-    Used as a key function in sorted() to handle optional fields like rank and market_cap.
-    """
-    return value is None, value if value is not None else fallback
-
-
 class Coin(BaseModel):
     """Represents a cryptocurrency with market data.
     
     Frozen model to ensure immutability after creation.
     """
     provider: ProviderName
-    symbol: str
+    base: str
     current_price: Decimal
-    currency: Currency
+    quote: Quote
 
     model_config = {"frozen": True}
 
     def __str__(self) -> str:
-        return f"{self.provider}'s {self.symbol} : {self.current_price}{self.currency.get_symbol()}"
+        return f"{self.provider}'s {self.base} : {self.current_price}{self.quote.get_symbol()}"
     def __repr__(self) -> str:
-        return f"{self.provider},{self.symbol},{self.current_price},{self.currency.get_symbol()}"
+        return f"{self.provider},{self.base},{self.current_price},{self.quote.get_symbol()}"
     @classmethod
     def from_string(cls, data: str) -> "Coin":
         parts = data.split(",")
@@ -80,13 +71,13 @@ class Coin(BaseModel):
         current_price = Decimal(parts[2])
         currency_symbol = parts[3]
 
-        currency = Currency.from_symbol(currency_symbol)
+        currency = Quote.from_symbol(currency_symbol)
 
         return cls(
             provider=provider,
-            symbol=symbol,
+            base=symbol,
             current_price=current_price,
-            currency=currency
+            quote=currency
         )
 
 
@@ -95,10 +86,10 @@ class Coins(BaseModel):
     
     Acts as a dictionary with symbol keys for easy access.
     """
-    coins: dict[str, Coin] = Field(default_factory=dict)  # the key is f"{provider}:{currency}:{symbol}"
+    coins: dict[str, Coin] = Field(default_factory=dict)  # the key is f"{provider}:{quote}:{base}"
 
     @classmethod
-    def from_list(cls, data: list[dict]) -> "Coins":
+    def from_list(cls, data: list[dict]) -> Coins:
         """Create a Coins collection from a list of coin data dictionaries."""
         coins = cls()
 
@@ -108,24 +99,24 @@ class Coins(BaseModel):
         return coins
 
     @staticmethod
-    def get_key_from_details(provider: ProviderName, currency: Currency, symbol: str) -> str:
-        return f"{provider}:{currency}:{symbol}"
+    def get_key_from_details(provider: ProviderName, quote: Quote, base: str) -> str:
+        return f"{provider}:{quote}:{base}"
 
-    def get(self, provider: ProviderName, currency: Currency, symbol: str) -> Coin:
+    def get(self, provider: ProviderName, quote: Quote, base: str) -> Coin:
         """Get a coin by symbol using bracket notation (coins['BTC'])."""
-        return self.coins[Coins.get_key_from_details(provider, currency, symbol)]
+        return self.coins[Coins.get_key_from_details(provider, quote, base)]
 
     def upsert(self, coin: Coin) -> None:
         """Add or update a coin in the collection."""
-        self.coins[Coins.get_key_from_details(coin.provider, coin.currency, coin.symbol)] = coin
+        self.coins[Coins.get_key_from_details(coin.provider, coin.quote, coin.base)] = coin
 
-    def remove(self, provider: ProviderName, currency: Currency, symbol: str) -> None:
+    def remove(self, provider: ProviderName, quote: Quote, base: str) -> None:
         """Remove a coin from the collection by symbol."""
-        del self.coins[Coins.get_key_from_details(provider, currency, symbol)]
+        del self.coins[Coins.get_key_from_details(provider, quote, base)]
 
-    def contains(self, provider: ProviderName, currency: Currency, symbol: str) -> bool:
+    def contains(self, provider: ProviderName, quote: Quote, base: str) -> bool:
         """Check if a coin symbol exists in the collection."""
-        return Coins.get_key_from_details(provider, currency, symbol) in self.coins
+        return Coins.get_key_from_details(provider, quote, base) in self.coins
 
     def __len__(self) -> int:
         """Return the number of coins in the collection."""

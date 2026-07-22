@@ -1,7 +1,7 @@
 import unittest.mock as mock
 from decimal import Decimal
 
-from coin_market.coin import Currency
+from coin_market.coin import Quote
 from coin_market.coin import ProviderName
 from coin_market.providers.bitpin import BitpinProvider
 
@@ -24,9 +24,9 @@ def test_bitpin(mock_get_json):
         ]
     }
     provider = BitpinProvider()
-    coins = provider.fetch(Currency.RLS)
-    assert coins.contains(ProviderName.BITPIN, Currency.RLS, "BTC")
-    btc = coins.get(ProviderName.BITPIN, Currency.RLS, "BTC")
-    assert btc.symbol == "BTC"
+    coins = provider.fetch(Quote.RLS)
+    assert coins.contains(ProviderName.BITPIN, Quote.RLS, "BTC")
+    btc = coins.get(ProviderName.BITPIN, Quote.RLS, "BTC")
+    assert btc.base == "BTC"
     assert isinstance(btc.current_price, Decimal)
     assert btc.current_price > 0

@@ -1,5 +1,5 @@
 from .provider_base import get_json
-from ..coin import Coins, Currency, ProviderName
+from ..coin import Coins, Quote, ProviderName
 
 
 class BitpinProvider:
@@ -10,11 +10,11 @@ class BitpinProvider:
     """
 
     @staticmethod
-    def fetch(currency: Currency) -> Coins:
+    def fetch(quote: Quote) -> Coins:
         """Fetch coin data from the Bitpin API.
 
         Args:
-            currency: Quote currency ("IRT" or "USDT").
+            quote: Quote currency ("IRT" or "USDT").
 
         Returns:
             Coins collection with market data.
@@ -23,24 +23,24 @@ class BitpinProvider:
 
         markets = json.get("results", [])
 
-        currency_string = ""
-        match currency:
-            case Currency.RLS:
-                currency_string = "IRT"
-            case Currency.USD:
-                currency_string = "USDT"
+        quote_string = ""
+        match quote:
+            case Quote.RLS:
+                quote_string = "IRT"
+            case Quote.USD:
+                quote_string = "USDT"
             case _:
-                raise ValueError(f"Unsupported currency: {currency}")
+                raise ValueError(f"Unsupported currency: {quote}")
 
         coins_data = [
             {
-                "symbol": market["currency1"]["code"].upper(),
+                "base": market["currency1"]["code"].upper(),
                 "current_price": market["price"],
-                "currency": currency,
+                "quote": quote,
                 "provider": ProviderName.BITPIN,
             }
             for market in markets
-            if market["currency2"]["code"].upper() == currency_string
+            if market["currency2"]["code"].upper() == quote_string
         ]
 
         return Coins.from_list(coins_data)

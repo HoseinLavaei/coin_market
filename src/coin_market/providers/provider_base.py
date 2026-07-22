@@ -3,7 +3,7 @@ from typing import Protocol
 import requests
 from requests import Session
 
-from ..coin import Coins, Currency
+from ..coin import Coins, Quote
 
 
 def get_json(url: str, params: dict[str, str] | None = None) -> dict:
@@ -18,5 +18,4 @@ def get_json(url: str, params: dict[str, str] | None = None) -> dict:
 
 class Provider(Protocol):
     @staticmethod
-    def fetch(currency: Currency) -> Coins:
-        raise NotImplementedError
+    def fetch(quote: Quote) -> Coins: ...

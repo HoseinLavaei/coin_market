@@ -1,5 +1,5 @@
 from .provider_base import get_json
-from ..coin import Coins, Currency, ProviderName
+from ..coin import Coins, Quote, ProviderName
 
 
 def _optional(value):
@@ -14,26 +14,26 @@ class WallexProvider:
     SUPPORTED_CURRENCIES = {"TMN", "USDT"}
 
     @staticmethod
-    def fetch(currency: Currency) -> Coins:
+    def fetch(quote: Quote) -> Coins:
         json = get_json("https://api.wallex.ir/v1/markets")
 
         symbols = json.get("result", {}).get("symbols", {})
 
         coins_data = []
 
-        currency_string = ""
+        quote_string = ""
         multiplier = 1
-        match currency:
-            case Currency.RLS:
-                currency_string = "TMN"
+        match quote:
+            case Quote.RLS:
+                quote_string = "TMN"
                 multiplier = 10
-            case Currency.USD:
-                currency_string = "USDT"
+            case Quote.USD:
+                quote_string = "USDT"
             case _:
-                raise ValueError(f"Unsupported currency: {currency}")
+                raise ValueError(f"Unsupported currency: {quote}")
 
         for market in symbols.values():
-            if market["quoteAsset"].upper() != currency_string:
+            if market["quoteAsset"].upper() != quote_string:
                 continue
 
             stats = market["stats"]
@@ -42,9 +42,9 @@ class WallexProvider:
                 continue
 
             coins_data.append({
-                "symbol": market["baseAsset"].upper(),
+                "base": market["baseAsset"].upper(),
                 "current_price": stats["lastPrice"] * multiplier,
-                "currency": currency,
+                "quote": quote,
                 "provider": ProviderName.WALLEX,
             })
 
