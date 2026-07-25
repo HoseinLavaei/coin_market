@@ -1,3 +1,4 @@
+import pytest
 import unittest.mock as mock
 from decimal import Decimal
 
@@ -6,8 +7,9 @@ from coin_market.coin import ProviderName
 from coin_market.providers.wallex import WallexProvider
 
 
+@pytest.mark.asyncio
 @mock.patch("coin_market.providers.wallex.get_json")
-def test_wallex(mock_get_json):
+async def test_wallex(mock_get_json):
     mock_get_json.return_value = {
         "result": {
             "symbols": {
@@ -27,7 +29,7 @@ def test_wallex(mock_get_json):
         }
     }
     provider = WallexProvider()
-    coins = provider.fetch(Quote.USD)
+    coins = await provider.fetch(Quote.USD)
     assert coins.contains(ProviderName.WALLEX, Quote.USD, "BTC")
     btc = coins.get(ProviderName.WALLEX, Quote.USD, "BTC")
     assert btc.base == "BTC"

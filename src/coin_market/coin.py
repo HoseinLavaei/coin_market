@@ -3,17 +3,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-
-class ProviderName(Enum):
-    ABAN_TETHER = "ABAN_TETHER"
-    BITPIN = "BITPIN"
-    EXIR = "EXIR"
-    NOBITEX = "NOBITEX"
-    RAMZINEX = "RAMZINEX"
-    WALLEX = "WALLEX"
-
-    def __str__(self) -> str:
-        return self.name
+from .provider_name import ProviderName
 
 
 class Quote(Enum):
@@ -57,11 +47,11 @@ class Coin(BaseModel):
     model_config = {"frozen": True}
 
     def __str__(self) -> str:
-        return f"{self.provider}'s {self.base} : {self.current_price}{self.quote.get_symbol()}"
-    def __repr__(self) -> str:
+        return f"{self.provider}'s {self.base} : {self.current_price} {self.quote.get_symbol()}"
+    def serialize(self) -> str:
         return f"{self.provider},{self.base},{self.current_price},{self.quote.get_symbol()}"
     @classmethod
-    def from_string(cls, data: str) -> "Coin":
+    def deserialize(cls, data: str) -> "Coin":
         parts = data.split(",")
         if len(parts) != 4:
             raise ValueError(f"Invalid coin data: {data}")
@@ -86,7 +76,7 @@ class Coins(BaseModel):
     
     Acts as a dictionary with symbol keys for easy access.
     """
-    coins: dict[str, Coin] = Field(default_factory=dict)  # the key is f"{provider}:{quote}:{base}"
+    coins: dict[str, Coin] = Field(default_factory=dict)  # the key is f"{provider_name}:{quote}:{base}"
 
     @classmethod
     def from_list(cls, data: list[dict]) -> Coins:
@@ -102,9 +92,9 @@ class Coins(BaseModel):
     def get_key_from_details(provider: ProviderName, quote: Quote, base: str) -> str:
         return f"{provider}:{quote}:{base}"
 
-    def get(self, provider: ProviderName, quote: Quote, base: str) -> Coin:
+    def get(self, provider: ProviderName, quote: Quote, base: str) -> Coin | None:
         """Get a coin by symbol using bracket notation (coins['BTC'])."""
-        return self.coins[Coins.get_key_from_details(provider, quote, base)]
+        return self.coins.get(Coins.get_key_from_details(provider, quote, base))
 
     def upsert(self, coin: Coin) -> None:
         """Add or update a coin in the collection."""
@@ -118,6 +108,10 @@ class Coins(BaseModel):
         """Check if a coin symbol exists in the collection."""
         return Coins.get_key_from_details(provider, quote, base) in self.coins
 
+    def find_by_base(self, base: str) -> list[Coin]:
+        """Find all coins with the specified base currency."""
+        return [coin for coin in self.coins.values() if coin.base.upper() == base.upper()]
+
     def __len__(self) -> int:
         """Return the number of coins in the collection."""
         return len(self.coins)
@@ -128,19 +122,16 @@ class Coins(BaseModel):
                 f"(No coins)"
             )
 
-        return (
-                f"Number of coins: {len(self)}\n\n"
-                + "\n\n".join(str(coin) for coin in self.coins.values())
-        )
-    def __repr__(self) -> str:
+        return "\n\n".join(str(coin) for coin in self.coins.values())
+    def serialize(self) -> str:
         output = ""
         for coin in self.coins.values():
             output += f"{coin.__repr__()}\n"
         return output.strip()
     @classmethod
-    def from_string(cls, data: str) -> "Coins":
+    def deserialize(cls, data: str) -> "Coins":
         lines = data.split("\n")
         coins = cls()
         for line in lines:
-            coins.upsert(Coin.from_string(line))
+            coins.upsert(Coin.deserialize(line))
         return coins

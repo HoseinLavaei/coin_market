@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from .provider_base import get_json
-from ..coin import Coins, Quote, ProviderName
+from ..coin import Coins, Quote
+from ..provider_name import ProviderName
 
 
 def optional(value):
@@ -9,11 +12,12 @@ def optional(value):
 
 
 class RamzinexProvider:
+    provider_name = ProviderName.RAMZINEX
     """Ramzinex API provider."""
 
-    @staticmethod
-    def fetch(quote: Quote) -> Coins:
-        json = get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
+    @classmethod
+    async def fetch(cls, quote: Quote) -> Coins:
+        json = await get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
 
         if json.get("status") != 0:
             raise RuntimeError("Ramzinex returned an invalid response.")
@@ -21,9 +25,11 @@ class RamzinexProvider:
         coins_data = []
 
         currency_string = ""
+        multiplier = 1
         match quote:
             case Quote.RLS:
                 currency_string = "irr"
+                multiplier = 1
             case Quote.USD:
                 currency_string = "usdt"
             case _:
@@ -42,9 +48,9 @@ class RamzinexProvider:
 
             coins_data.append({
                 "base": symbol,
-                "current_price": current_price,
+                "current_price": Decimal(current_price) * multiplier,
                 "quote": quote,
-                "provider": ProviderName.RAMZINEX,
+                "provider": cls.provider_name,
             })
 
         return Coins.from_list(coins_data)

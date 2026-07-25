@@ -1,16 +1,20 @@
+from decimal import Decimal
+
 from .provider_base import get_json
-from ..coin import Coins, Quote, ProviderName
+from ..coin import Coins, Quote
+from ..provider_name import ProviderName
 
 
 class BitpinProvider:
+    provider_name = ProviderName.BITPIN
     """Bitpin API provider for cryptocurrency market data.
 
     Fetches market data for trading pairs. Bitpin does not provide market cap,
     circulating supply, or rank information.
     """
 
-    @staticmethod
-    def fetch(quote: Quote) -> Coins:
+    @classmethod
+    async def fetch(cls, quote: Quote) -> Coins:
         """Fetch coin data from the Bitpin API.
 
         Args:
@@ -19,14 +23,16 @@ class BitpinProvider:
         Returns:
             Coins collection with market data.
         """
-        json = get_json("https://api.bitpin.ir/v1/mkt/markets/")
+        json = await get_json("https://api.bitpin.ir/v1/mkt/markets/")
 
         markets = json.get("results", [])
 
         quote_string = ""
+        multiplier = 1
         match quote:
             case Quote.RLS:
                 quote_string = "IRT"
+                multiplier = 10
             case Quote.USD:
                 quote_string = "USDT"
             case _:
@@ -35,9 +41,9 @@ class BitpinProvider:
         coins_data = [
             {
                 "base": market["currency1"]["code"].upper(),
-                "current_price": market["price"],
+                "current_price": Decimal(market["price"]) * multiplier,
                 "quote": quote,
-                "provider": ProviderName.BITPIN,
+                "provider": cls.provider_name,
             }
             for market in markets
             if market["currency2"]["code"].upper() == quote_string

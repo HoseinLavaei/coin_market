@@ -1,3 +1,4 @@
+import pytest
 import unittest.mock as mock
 from decimal import Decimal
 
@@ -6,8 +7,9 @@ from coin_market.coin import Quote
 from coin_market.coin import ProviderName
 
 
+@pytest.mark.asyncio
 @mock.patch("coin_market.providers.aban_tether.get_json")
-def test_aban_tether(mock_get_json):
+async def test_aban_tether(mock_get_json):
     mock_get_json.return_value = {
         "data": {
             "markets": {
@@ -20,7 +22,7 @@ def test_aban_tether(mock_get_json):
         }
     }
     aban_tether = AbanTetherProvider()
-    aban_tether_coins = aban_tether.fetch(Quote.RLS)
+    aban_tether_coins = await aban_tether.fetch(Quote.RLS)
     assert aban_tether_coins.contains(ProviderName.ABAN_TETHER, Quote.RLS, "BTC")
     btc_aban_tether = aban_tether_coins.get(ProviderName.ABAN_TETHER, Quote.RLS, "BTC")
     assert btc_aban_tether.base == "BTC"

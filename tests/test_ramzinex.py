@@ -1,3 +1,4 @@
+import pytest
 import unittest.mock as mock
 from decimal import Decimal
 
@@ -6,8 +7,9 @@ from coin_market.coin import ProviderName
 from coin_market.providers.ramzinex import RamzinexProvider
 
 
+@pytest.mark.asyncio
 @mock.patch("coin_market.providers.ramzinex.get_json")
-def test_ramzinex(mock_get_json):
+async def test_ramzinex(mock_get_json):
     mock_get_json.return_value = {
         "status": 0,
         "data": [
@@ -27,7 +29,7 @@ def test_ramzinex(mock_get_json):
         ]
     }
     provider = RamzinexProvider()
-    coins = provider.fetch(Quote.RLS)
+    coins = await provider.fetch(Quote.RLS)
     assert coins.contains(ProviderName.RAMZINEX, Quote.RLS, "BTC")
     btc = coins.get(ProviderName.RAMZINEX, Quote.RLS, "BTC")
     assert btc.base == "BTC"

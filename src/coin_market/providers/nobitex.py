@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from .provider_base import get_json
-from ..coin import Coins, Quote, ProviderName
+from ..coin import Coins, Quote
+from ..provider_name import ProviderName
 
 
 def get_params(quote: Quote) -> dict[str, str]:
@@ -18,14 +21,15 @@ def get_params(quote: Quote) -> dict[str, str]:
 
 
 class NobitexProvider:
+    provider_name = ProviderName.NOBITEX
     """Nobitex exchange API provider for Iranian cryptocurrency market.
 
     Supports Iranian Rial (RLS) as quote currency.
     """
 
-    @staticmethod
-    def fetch(quote: Quote) -> Coins:
-        json = get_json("https://apiv2.nobitex.ir/market/stats", get_params(quote))
+    @classmethod
+    async def fetch(cls, quote: Quote) -> Coins:
+        json = await get_json("https://apiv2.nobitex.ir/market/stats", get_params(quote))
         if json.get("status") != "ok":
             raise RuntimeError("Nobitex returned an invalid response.")
 
@@ -35,11 +39,13 @@ class NobitexProvider:
         for market_key, market_data in stats.items():
             symbol = market_key.split("-")[0].upper()
 
+            price = Decimal(market_data["latest"])
+
             coins_data.append({
                 "base": symbol,
-                "current_price": market_data["latest"],
+                "current_price": price,
                 "quote": quote,
-                "provider": ProviderName.NOBITEX,
+                "provider": cls.provider_name,
             })
 
         return Coins.from_list(coins_data)

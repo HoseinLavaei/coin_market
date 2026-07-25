@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from .provider_base import get_json
-from ..coin import Coins, Quote, ProviderName
+from ..coin import Coins, Quote
+from ..provider_name import ProviderName
 
 
 def _optional(value):
@@ -7,15 +10,13 @@ def _optional(value):
         return None
     return value
 
-
 class WallexProvider:
+    provider_name = ProviderName.WALLEX
     """Wallex API provider."""
 
-    SUPPORTED_CURRENCIES = {"TMN", "USDT"}
-
-    @staticmethod
-    def fetch(quote: Quote) -> Coins:
-        json = get_json("https://api.wallex.ir/v1/markets")
+    @classmethod
+    async def fetch(cls, quote: Quote) -> Coins:
+        json = await get_json("https://api.wallex.ir/v1/markets")
 
         symbols = json.get("result", {}).get("symbols", {})
 
@@ -41,11 +42,15 @@ class WallexProvider:
             if stats["lastPrice"] == "-":
                 continue
 
+            current_price:str = stats["lastPrice"]
+            current_price = current_price.rstrip("0")
+            current_price = current_price.rstrip(",")
+
             coins_data.append({
                 "base": market["baseAsset"].upper(),
-                "current_price": stats["lastPrice"] * multiplier,
+                "current_price": Decimal(current_price) * multiplier,
                 "quote": quote,
-                "provider": ProviderName.WALLEX,
+                "provider": cls.provider_name,
             })
 
         return Coins.from_list(coins_data)

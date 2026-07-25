@@ -1,3 +1,4 @@
+import pytest
 import unittest.mock as mock
 from decimal import Decimal
 
@@ -6,8 +7,9 @@ from coin_market.coin import ProviderName
 from coin_market.providers.bitpin import BitpinProvider
 
 
+@pytest.mark.asyncio
 @mock.patch("coin_market.providers.bitpin.get_json")
-def test_bitpin(mock_get_json):
+async def test_bitpin(mock_get_json):
     mock_get_json.return_value = {
         "results": [
             {
@@ -24,7 +26,7 @@ def test_bitpin(mock_get_json):
         ]
     }
     provider = BitpinProvider()
-    coins = provider.fetch(Quote.RLS)
+    coins = await provider.fetch(Quote.RLS)
     assert coins.contains(ProviderName.BITPIN, Quote.RLS, "BTC")
     btc = coins.get(ProviderName.BITPIN, Quote.RLS, "BTC")
     assert btc.base == "BTC"

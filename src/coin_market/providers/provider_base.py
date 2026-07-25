@@ -1,21 +1,22 @@
 from typing import Protocol
 
-import requests
-from requests import Session
+import httpx
 
+from .. import ProviderName
 from ..coin import Coins, Quote
 
 
-def get_json(url: str, params: dict[str, str] | None = None) -> dict:
+async def get_json(url: str, params: dict[str, str] | None = None) -> dict:
     try:
-        session: Session = requests.Session()
-        response = session.get(url, params=params or {}, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params or {}, timeout=30)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
         raise RuntimeError(f"API error: {e}") from e
 
 
 class Provider(Protocol):
-    @staticmethod
-    def fetch(quote: Quote) -> Coins: ...
+    provider_name: ProviderName
+    @classmethod
+    async def fetch(cls, quote: Quote) -> Coins: ...

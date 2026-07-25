@@ -1,3 +1,4 @@
+import pytest
 import unittest.mock as mock
 from decimal import Decimal
 
@@ -6,8 +7,9 @@ from coin_market.coin import ProviderName
 from coin_market.providers.nobitex import NobitexProvider
 
 
+@pytest.mark.asyncio
 @mock.patch("coin_market.providers.nobitex.get_json")
-def test_nobitex(mock_get_json):
+async def test_nobitex(mock_get_json):
     mock_get_json.return_value = {
         "status": "ok",
         "stats": {
@@ -21,7 +23,7 @@ def test_nobitex(mock_get_json):
         }
     }
     provider = NobitexProvider()
-    coins = provider.fetch(Quote.RLS)
+    coins = await provider.fetch(Quote.RLS)
     assert coins.contains(ProviderName.NOBITEX, Quote.RLS, "BTC")
     btc = coins.get(ProviderName.NOBITEX, Quote.RLS, "BTC")
     assert btc.base == "BTC"

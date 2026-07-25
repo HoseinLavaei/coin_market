@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from .provider_base import get_json
-from ..coin import Coins, Quote, ProviderName
+from ..coin import Coins, Quote
+from ..provider_name import ProviderName
 
 
 def optional(value):
@@ -9,22 +12,26 @@ def optional(value):
 
 
 class ExirProvider:
+    provider_name = ProviderName.EXIR
     """Exir exchange API provider."""
 
-    @staticmethod
-    def fetch(quote: Quote) -> Coins:
+    @classmethod
+    async def fetch(cls, quote: Quote) -> Coins:
         coins_data = []
-        json = get_json("https://api.exir.io/v2/tickers")
+        json = await get_json("https://api.exir.io/v2/tickers")
         for pair, ticker in json.items():
+            pair = pair.upper()
             if "-" not in pair:
                 continue
 
             base, received_quote = pair.split("-", 1)
 
             currency_string = ""
+            multiplier = 1
             match quote:
                 case Quote.RLS:
                     currency_string = "IRT"
+                    multiplier = 10
                 case Quote.USD:
                     currency_string = "USDT"
                 case _:
@@ -39,9 +46,9 @@ class ExirProvider:
 
             coins_data.append({
                 "base": base,
-                "current_price": last,
+                "current_price": Decimal(last) * multiplier,
                 "quote": quote,
-                "provider": ProviderName.EXIR,
+                "provider": cls.provider_name,
             })
 
         return Coins.from_list(coins_data)
