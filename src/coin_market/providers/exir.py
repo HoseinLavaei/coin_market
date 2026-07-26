@@ -40,7 +40,7 @@ class ExirProvider:
             if received_quote != currency_string:
                 continue
 
-            last = optional(ticker.get("last"))
+            last:str|None = optional(ticker.get("last"))
             if last is None:
                 continue
 

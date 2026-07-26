@@ -2,18 +2,17 @@ import asyncio
 import os
 import sys
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot
 
 from . import AbanTetherProvider, BitpinProvider, ExirProvider, NobitexProvider, RamzinexProvider, \
     WallexProvider, Quote, Coins
-
-# Global set to store all user chat IDs
-subscribed_users = set()
+from .db import init_db, save_coins
 
 # Global config variables (will be set in run_bot)
 TELEGRAM_TOKEN = None
 INTERVAL = 60
+GROUP_ID = None
+
 
 async def get_tethers() -> Coins:
     providers = [AbanTetherProvider(), BitpinProvider(), ExirProvider(), NobitexProvider(), RamzinexProvider(),
@@ -34,51 +33,34 @@ async def get_tethers() -> Coins:
             coins.upsert(coin)
     return coins
 
-async def send_prices_to_user(bot, user_id: int):
-    """Fetch prices and send to a specific user."""
+
+async def broadcast_prices(bot):
+    if not GROUP_ID:
+        return
+
+    # Fetch once and broadcast
     coins = await get_tethers()
     full_message = f"{'#' * 50}\n{coins}\n"
+
+    # Save to database
     try:
-        await bot.send_message(chat_id=user_id, text=full_message)
+        await save_coins(coins)
     except Exception as e:
-        print(f"Failed to send to {user_id}: {e}")
+        print(f"Failed to save to database: {e}")
 
-async def start(update: Update, _context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    if not chat:
-        return
-    msg = update.message
-    if not msg:
-        return
+    try:
+        await bot.send_message(chat_id=GROUP_ID, text=full_message)
+    except Exception as e:
+        print(f"Failed to send to group {GROUP_ID}: {e}")
 
-    user_id = chat.id
-    subscribed_users.add(user_id)
-    await msg.reply_text(
-        f"You're subscribed! You'll receive USDT price updates every {INTERVAL} seconds."
-    )
 
-    # Send the current prices immediately
-    await send_prices_to_user(_context.bot, user_id)
+async def run_bot():
+    global TELEGRAM_TOKEN, INTERVAL, GROUP_ID
 
-async def broadcast_prices(context: ContextTypes.DEFAULT_TYPE):
-    if not subscribed_users:
-        return
-
-    # We don't need to fetch inside the loop – fetch once and reuse
-    coins = await get_tethers()
-    full_message = f"{'#' * 50}\n{coins}\n"
-
-    for user_id in list(subscribed_users):
-        try:
-            await context.bot.send_message(chat_id=user_id, text=full_message)
-        except Exception as e:
-            print(f"Failed to send to {user_id}: {e}")
-
-def run_bot():
-    global TELEGRAM_TOKEN, INTERVAL
-    
     # ===== CONFIGURATION =====
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+    GROUP_ID = os.getenv("GROUP_ID")
+
     try:
         INTERVAL = int(os.getenv("INTERVAL", "60"))
     except ValueError:
@@ -88,18 +70,25 @@ def run_bot():
     if not TELEGRAM_TOKEN:
         print("Error: TELEGRAM_TOKEN environment variable is not set.")
         sys.exit(1)
+
+    if not GROUP_ID:
+        print("Error: GROUP_ID environment variable is not set. Bot will not be able to send messages.")
+        sys.exit(1)
+
+    # Initialize Database
+    print("Initializing database...")
+    await init_db()
+
     # =========================
 
-    # Create the Application
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    bot = Bot(token=TELEGRAM_TOKEN)
 
-    # Add command handler for /start
-    app.add_handler(CommandHandler("start", start))
+    print(f"Bot is starting. Broadcasting to group {GROUP_ID} every {INTERVAL} seconds.")
 
-    # Schedule the broadcast to run every INTERVAL seconds
-    job_queue = app.job_queue
-    job_queue.run_repeating(broadcast_prices, interval=INTERVAL, first=0)
+    while True:
+        start_time = asyncio.get_event_loop().time()
+        await broadcast_prices(bot)
 
-    # Start the bot (this blocks until you stop it)
-    print("Bot is running. Send /start to subscribe.")
-    app.run_polling()
+        elapsed = asyncio.get_event_loop().time() - start_time
+        wait_time = max(0, INTERVAL - elapsed)
+        await asyncio.sleep(wait_time)
