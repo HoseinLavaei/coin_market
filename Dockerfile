@@ -12,7 +12,7 @@ COPY pyproject.toml README.md /app/
 COPY src /app/src
 
 # Install dependencies and the project
-RUN pip install --no-cache-dir . httpx python-dotenv python-telegram-bot sqlalchemy asyncpg
+RUN pip install . httpx python-dotenv "python-telegram-bot[job-queue]" sqlalchemy asyncpg
 
 # Copy the rest of the files (like .env if needed, though compose handles it)
 COPY . /app

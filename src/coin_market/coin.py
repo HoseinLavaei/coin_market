@@ -1,3 +1,4 @@
+from datetime import datetime, tzinfo
 from decimal import Decimal
 from enum import Enum
 
@@ -41,33 +42,48 @@ class Coin(BaseModel):
     """
     provider: ProviderName
     base: str
-    current_price: Decimal
+    buy_price: Decimal
+    sell_price: Decimal
     quote: Quote
+    timestamp: datetime
 
     model_config = {"frozen": True}
 
+    
     def __str__(self) -> str:
-        return f"{self.provider}'s {self.base} : {self.current_price} {self.quote.get_symbol()}"
+        formatted_buy = f"{self.buy_price:,}"
+        formatted_sell = f"{self.sell_price:,}"
+        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.provider}'s {self.base} : Buy: {formatted_buy} {self.quote.get_symbol()} , Sell: {formatted_sell} {self.quote.get_symbol()}"
+
+    def to_timezone(self, tz:tzinfo) -> "Coin":
+        """Returns a new Coin instance with the timestamp converted to the given timezone."""
+        return self.model_copy(update={"timestamp": self.timestamp.astimezone(tz)})
+
     def serialize(self) -> str:
-        return f"{self.provider},{self.base},{self.current_price},{self.quote.get_symbol()}"
+        timestamp_str = self.timestamp.isoformat() if self.timestamp else ""
+        return f"{self.provider.name}|{self.base}|{self.buy_price}|{self.sell_price}|{self.quote.get_symbol()}|{timestamp_str}"
     @classmethod
     def deserialize(cls, data: str) -> "Coin":
-        parts = data.split(",")
-        if len(parts) != 4:
+        parts = data.split("|")
+        if len(parts) < 5:
             raise ValueError(f"Invalid coin data: {data}")
 
         provider = ProviderName[parts[0]]
         symbol = parts[1]
-        current_price = Decimal(parts[2])
-        currency_symbol = parts[3]
+        buy_price = Decimal(parts[2])
+        sell_price = Decimal(parts[3])
+        currency_symbol = parts[4]
+        timestamp = datetime.fromisoformat(parts[5])
 
         currency = Quote.from_symbol(currency_symbol)
 
         return cls(
             provider=provider,
             base=symbol,
-            current_price=current_price,
-            quote=currency
+            buy_price=buy_price,
+            sell_price=sell_price,
+            quote=currency,
+            timestamp=timestamp
         )
 
 

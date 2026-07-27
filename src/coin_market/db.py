@@ -1,9 +1,9 @@
 import os
-from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, Numeric, String, Enum as SQLEnum, text
+from datetime import tzinfo
+from sqlalchemy import Column, DateTime, Numeric, String, Enum as SQLEnum, text, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from .coin import Quote
+from .coin import Quote, Coin
 from .provider_name import ProviderName
 
 
@@ -19,7 +19,8 @@ class CoinPrice(Base):
     provider = Column(SQLEnum(ProviderName), primary_key=True)
     base = Column(String, primary_key=True)
     quote = Column(SQLEnum(Quote), primary_key=True)
-    price = Column(Numeric(precision=20, scale=8), nullable=False)
+    buy_price = Column(Numeric(precision=20, scale=8), nullable=False)
+    sell_price = Column(Numeric(precision=20, scale=8), nullable=False)
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:password@db/coin_market")
@@ -49,14 +50,33 @@ async def init_db():
 async def save_coins(coins_collection):
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            now = datetime.now(timezone.utc)
             for coin in coins_collection.coins.values():
                 db_coin = CoinPrice(
-                    timestamp=now,
+                    timestamp=coin.timestamp,
                     provider=coin.provider,
                     base=coin.base,
                     quote=coin.quote,
-                    price=coin.current_price
+                    buy_price=coin.buy_price,
+                    sell_price=coin.sell_price
                 )
                 session.add(db_coin)
         await session.commit()
+
+
+async def get_history(limit: int, tz:tzinfo) -> list[Coin]:
+    async with AsyncSessionLocal() as session:
+        stmt = select(CoinPrice).order_by(CoinPrice.timestamp.desc()).limit(limit)
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+
+        return [
+            Coin(
+                provider=row.provider,
+                base=row.base,
+                buy_price=row.buy_price,
+                sell_price=row.sell_price,
+                quote=row.quote,
+                timestamp=row.timestamp
+            ).to_timezone(tz)
+            for row in rows
+        ]

@@ -18,6 +18,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
+    "python-telegram-bot[job-queue]>=20.0",
 ]
 
 [tool.setuptools]

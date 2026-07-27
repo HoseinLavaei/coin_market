@@ -1,3 +1,4 @@
+import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
@@ -5,9 +6,9 @@ from ..coin import Coins, Quote
 from ..provider_name import ProviderName
 
 
-class AbanTetherProvider:
-    provider_name = ProviderName.ABAN_TETHER
-    """AbanTether exchange API provider.
+class AbanTetherOTCProvider:
+    provider_name = ProviderName.ABAN_TETHER_OTC
+    """AbanTether exchange OTC API provider.
 
     Supports Iranian Rial (IRT) markets.
     """
@@ -35,8 +36,8 @@ class AbanTetherProvider:
                 "provider": cls.provider_name,
                 "quote": quote,
                 "base": market["symbol"],
-                # AbanTether exposes buy/sell prices.
-                # We use the buy price as the current market price.
-                "current_price": Decimal(market["buy_price"]) * multiplier,
+                "buy_price": Decimal(str(market["buy_price"])) * multiplier,
+                "sell_price": Decimal(str(market["sell_price"])) * multiplier,
+                "timestamp" : datetime.datetime.now(datetime.timezone.utc),
             })
         return Coins.from_list(coins_data)
