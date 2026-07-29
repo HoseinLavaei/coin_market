@@ -7,14 +7,14 @@ from pydantic import BaseModel, Field
 from .provider_name import ProviderName
 
 
+class Base(Enum):
+    USDT = "USDT"
+    BTC = "BTC"
+
 class Quote(Enum):
     RLS = "RLS"
     USD = "USD"
     EUR = "EUR"
-
-    def __str__(self) -> str:
-        return self.name
-
     def get_symbol(self) -> str:
         match self:
             case self.RLS:
@@ -24,7 +24,7 @@ class Quote(Enum):
             case self.EUR:
                 return "€"
     @classmethod
-    def from_symbol(cls, data: str) -> "Quote":
+    def from_symbol(cls, data: str) -> Quote:
         match data:
             case "RIAL":
                 return cls.RLS
@@ -41,7 +41,7 @@ class Coin(BaseModel):
     Frozen model to ensure immutability after creation.
     """
     provider: ProviderName
-    base: str
+    base: Base
     buy_price: Decimal
     sell_price: Decimal
     quote: Quote
@@ -49,88 +49,37 @@ class Coin(BaseModel):
 
     model_config = {"frozen": True}
 
-    
     def __str__(self) -> str:
         formatted_buy = f"{self.buy_price:,}"
         formatted_sell = f"{self.sell_price:,}"
-        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.provider}'s {self.base} : Buy: {formatted_buy} {self.quote.get_symbol()} , Sell: {formatted_sell} {self.quote.get_symbol()}"
+        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.provider.value}'s {self.base.value} : Buy: {formatted_buy} {self.quote.get_symbol()} , Sell: {formatted_sell} {self.quote.get_symbol()}"
 
     def to_timezone(self, tz:tzinfo) -> "Coin":
         """Returns a new Coin instance with the timestamp converted to the given timezone."""
         return self.model_copy(update={"timestamp": self.timestamp.astimezone(tz)})
 
-    def serialize(self) -> str:
-        timestamp_str = self.timestamp.isoformat() if self.timestamp else ""
-        return f"{self.provider.name}|{self.base}|{self.buy_price}|{self.sell_price}|{self.quote.get_symbol()}|{timestamp_str}"
-    @classmethod
-    def deserialize(cls, data: str) -> "Coin":
-        parts = data.split("|")
-        if len(parts) < 5:
-            raise ValueError(f"Invalid coin data: {data}")
-
-        provider = ProviderName[parts[0]]
-        symbol = parts[1]
-        buy_price = Decimal(parts[2])
-        sell_price = Decimal(parts[3])
-        currency_symbol = parts[4]
-        timestamp = datetime.fromisoformat(parts[5])
-
-        currency = Quote.from_symbol(currency_symbol)
-
-        return cls(
-            provider=provider,
-            base=symbol,
-            buy_price=buy_price,
-            sell_price=sell_price,
-            quote=currency,
-            timestamp=timestamp
-        )
-
-
 class Coins(BaseModel):
     """Collection of coins from a specific provider and currency.
-    
+
     Acts as a dictionary with symbol keys for easy access.
     """
-    coins: dict[str, Coin] = Field(default_factory=dict)  # the key is f"{provider_name}:{quote}:{base}"
-
-    @classmethod
-    def from_list(cls, data: list[dict]) -> Coins:
-        """Create a Coins collection from a list of coin data dictionaries."""
-        coins = cls()
-
-        for coin_data in data:
-            coins.upsert(Coin.model_validate(coin_data))
-
-        return coins
-
-    @staticmethod
-    def get_key_from_details(provider: ProviderName, quote: Quote, base: str) -> str:
-        return f"{provider}:{quote}:{base}"
-
-    def get(self, provider: ProviderName, quote: Quote, base: str) -> Coin | None:
-        """Get a coin by symbol using bracket notation (coins['BTC'])."""
-        return self.coins.get(Coins.get_key_from_details(provider, quote, base))
+    coins: dict[tuple[ProviderName,Quote,Base],Coin] = Field(default_factory=dict)  # the key is f"{provider_name}:{quote}:{base}"
 
     def upsert(self, coin: Coin) -> None:
-        """Add or update a coin in the collection."""
-        self.coins[Coins.get_key_from_details(coin.provider, coin.quote, coin.base)] = coin
+        key = self.get_key_from_details(coin.provider, coin.quote, coin.base)
+        self.coins[key] = coin
 
-    def remove(self, provider: ProviderName, quote: Quote, base: str) -> None:
-        """Remove a coin from the collection by symbol."""
-        del self.coins[Coins.get_key_from_details(provider, quote, base)]
+    @staticmethod
+    def get_key_from_details(provider: ProviderName, quote: Quote, base: Base) -> tuple[ProviderName,Quote,Base]:
+        return provider, quote, base
 
-    def contains(self, provider: ProviderName, quote: Quote, base: str) -> bool:
-        """Check if a coin symbol exists in the collection."""
-        return Coins.get_key_from_details(provider, quote, base) in self.coins
+    def to_timezone(self, tz:tzinfo) -> Coins:
+        """Returns a new Coin instance with the timestamp converted to the given timezone."""
+        result:Coins=Coins()
+        for coin in self.coins.values():
+            result.upsert(coin.to_timezone(tz))
+        return result
 
-    def find_by_base(self, base: str) -> list[Coin]:
-        """Find all coins with the specified base currency."""
-        return [coin for coin in self.coins.values() if coin.base.upper() == base.upper()]
-
-    def __len__(self) -> int:
-        """Return the number of coins in the collection."""
-        return len(self.coins)
 
     def __str__(self) -> str:
         if not self.coins:
@@ -139,15 +88,155 @@ class Coins(BaseModel):
             )
 
         return "\n\n".join(str(coin) for coin in self.coins.values())
-    def serialize(self) -> str:
-        output = ""
-        for coin in self.coins.values():
-            output += f"{coin.__repr__()}\n"
-        return output.strip()
-    @classmethod
-    def deserialize(cls, data: str) -> "Coins":
-        lines = data.split("\n")
-        coins = cls()
-        for line in lines:
-            coins.upsert(Coin.deserialize(line))
-        return coins
+
+
+class OrderBook(BaseModel):
+    asks: list[tuple[Coin, Decimal]]
+    bids: list[tuple[Coin, Decimal]]
+
+    def get_by_volume(self, volume: Decimal) -> Coin:
+        """
+        Returns a Coin whose:
+          - buy_price  = volume‑weighted average of the ASKS (what you pay when buying)
+          - sell_price = volume‑weighted average of the BIDS (what you receive when selling)
+        Consumes up to `volume` units from each side independently.
+        If a side has insufficient liquidity, all available units are used.
+        """
+        if not self.asks or not self.bids:
+            raise ValueError("Order book is empty on one or both sides")
+        if volume <= 0:
+            raise ValueError("Volume must be positive")
+
+        # Average BUY price (consume ASKS)
+        total_buy_value = Decimal('0')
+        total_buy_volume = Decimal('0')
+        remaining_buy = volume
+
+
+
+        # TODO
+        for coin, amount in self.asks:
+            if remaining_buy <= 0:
+                break
+            take = min(amount, remaining_buy)
+            total_buy_value += coin.sell_price * take
+            total_buy_volume += take
+            remaining_buy -= take
+
+        if total_buy_volume == 0:
+            raise ValueError("No volume available in asks")
+        avg_buy = total_buy_value / total_buy_volume
+
+        # Average SELL price (consume BIDS)
+        total_sell_value = Decimal('0')
+        total_sell_volume = Decimal('0')
+        remaining_sell = volume
+
+        for coin, amount in self.bids:
+            if remaining_sell <= 0:
+                break
+            take = min(amount, remaining_sell)
+            total_sell_value += coin.buy_price * take
+            total_sell_volume += take
+            remaining_sell -= take
+
+        if total_sell_volume == 0:
+            raise ValueError("No volume available in bids")
+        avg_sell = total_sell_value / total_sell_volume
+
+        # Build and return the result
+        first_coin = self.asks[0][0] if self.asks else self.bids[0][0]
+        return Coin(
+            provider=first_coin.provider,
+            base=first_coin.base,
+            buy_price=avg_buy,
+            sell_price=avg_sell,
+            quote=first_coin.quote,
+            timestamp=first_coin.timestamp
+        )
+
+    def get_provider(self) -> ProviderName:
+        if self.asks:
+            return self.asks[0][0].provider
+        elif self.bids:
+            return self.bids[0][0].provider
+        else:
+            raise ValueError("Order book is empty")
+
+    def get_quote(self) -> Quote:
+        if self.asks:
+            return self.asks[0][0].quote
+        elif self.bids:
+            return self.bids[0][0].quote
+        else:
+            raise ValueError("Order book is empty")
+
+    def get_base(self) -> Base:
+        if self.asks:
+            return self.asks[0][0].base
+        elif self.bids:
+            return self.bids[0][0].base
+        else:
+            raise ValueError("Order book is empty")
+
+    def to_timezone(self, tz: tzinfo) -> "OrderBook":
+        """Returns a new OrderBook instance with all timestamps converted to the given timezone."""
+        new_asks = [(coin.to_timezone(tz), amount) for coin, amount in self.asks]
+        new_bids = [(coin.to_timezone(tz), amount) for coin, amount in self.bids]
+        return OrderBook(asks=new_asks, bids=new_bids)
+
+    def __str__(self) -> str:
+        if not self.asks and not self.bids:
+            return "OrderBook(empty)"
+
+        total_ask_vol = sum(amt for _, amt in self.asks)
+        total_bid_vol = sum(amt for _, amt in self.bids)
+
+        # Base summary
+        summary = (
+            f"OrderBook (asks: {len(self.asks)} levels, total vol: {total_ask_vol:.4f} | "
+            f"bids: {len(self.bids)} levels, total vol: {total_bid_vol:.4f})"
+        )
+
+        # Try to show VWAP for 1 unit of the base asset (e.g., 1 BTC, 1 USDT, etc.)
+        try:
+            vwap_coin = self.get_by_volume(Decimal('1'))
+            return f"{summary}\n  VWAP for 1.0 base: {vwap_coin}"
+        except Exception:
+            # Fallback: show best bid/ask if VWAP fails (e.g., book has no volume)
+            best_ask = self.asks[0][0].sell_price if self.asks else None
+            best_bid = self.bids[0][0].buy_price if self.bids else None
+            return f"{summary}\n  Best Ask: {best_ask}, Best Bid: {best_bid}"
+
+class OrderBooks(BaseModel):
+    books: dict[tuple[ProviderName, Quote, Base], OrderBook] = Field(default_factory=dict)
+
+    def upsert(self, book: OrderBook) -> None:
+        key = self.get_key_from_details(
+            book.get_provider(),  # Now works with new OrderBook
+            book.get_quote(),     # Now works with new OrderBook
+            book.get_base()       # Now works with new OrderBook
+        )
+        self.books[key] = book
+
+    @staticmethod
+    def get_key_from_details(provider: ProviderName, quote: Quote, base: Base) -> tuple[ProviderName, Quote, Base]:
+        return provider, quote, base
+
+    def to_timezone(self, tz: tzinfo) -> "OrderBooks":
+        """Returns a new OrderBooks instance with all timestamps converted to the given timezone."""
+        result = OrderBooks()
+        for book in self.books.values():
+            result.upsert(book.to_timezone(tz))  # Now works with new OrderBook
+        return result
+
+    def __str__(self) -> str:
+        if not self.books:
+            return "OrderBooks(empty)"
+
+        lines = []
+        for (provider, quote, base), book in self.books.items():
+            # Indent the multi-line book string
+            book_str = str(book).replace("\n", "\n  ")
+            lines.append(f"{provider.value}/{quote.value}/{base.value}:\n  {book_str}")
+        return "OrderBooks:\n" + "\n\n".join(lines)

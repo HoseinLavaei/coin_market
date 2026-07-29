@@ -12,7 +12,7 @@ services:
       db:
         condition: service_healthy
     restart: always
-
+    network_mode: host
   db:
     image: timescale/timescaledb:latest-pg16
     container_name: coin-market-db

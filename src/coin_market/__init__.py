@@ -1,27 +1,32 @@
-from .coin import Coin, Coins, Quote
+from .coin import Coin, Coins, Quote, Base, OrderBook, OrderBooks
 from .provider_name import ProviderName
-from .providers import AbanTetherOTCProvider, \
-    BitpinOTCProvider, BitpinP2PProvider, \
-    ExirP2PProvider, \
-    NobitexOTCProvider, NobitexP2PProvider, \
+from .providers import AbanTetherProvider, \
+    BitpinProvider, \
+    ExirProvider, \
+    NobitexProvider, \
     Provider, \
-    RamzinexOTCProvider, RamzinexP2PProvider, \
-    WallexOTCProvider, WallexP2PProvider
+    RamzinexProvider, \
+    WallexProvider, \
+    TabdealProvider,\
+    OmpfinexProvider,\
+    OkexProvider
 
 __all__ = [
     "Coin",
     "Coins",
     "Quote",
+    "Base",
+    "OrderBook",
+    "OrderBooks",
     "Provider",
     "ProviderName",
-    "NobitexOTCProvider",
-    "NobitexP2PProvider",
-    "AbanTetherOTCProvider",
-    "WallexOTCProvider",
-    "WallexP2PProvider",
-    "BitpinOTCProvider",
-    "BitpinP2PProvider",
-    "RamzinexOTCProvider",
-    "RamzinexP2PProvider",
-    "ExirP2PProvider",
+    "NobitexProvider",
+    "AbanTetherProvider",
+    "WallexProvider",
+    "BitpinProvider",
+    "RamzinexProvider",
+    "ExirProvider",
+    "TabdealProvider",
+    "OmpfinexProvider",
+    "OkexProvider",
 ]

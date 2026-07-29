@@ -1,21 +1,23 @@
-from .aban_tether import AbanTetherOTCProvider
-from .bitpin import BitpinOTCProvider, BitpinP2PProvider
-from .exir import ExirP2PProvider
-from .nobitex import NobitexOTCProvider, NobitexP2PProvider
+from .aban_tether import AbanTetherProvider
+from .bitpin import BitpinProvider
+from .exir import ExirProvider
+from .nobitex import NobitexProvider
 from .provider_base import Provider
-from .ramzinex import RamzinexOTCProvider, RamzinexP2PProvider
-from .wallex import WallexOTCProvider, WallexP2PProvider
+from .ramzinex import RamzinexProvider
+from .wallex import WallexProvider
+from .tabdeal import TabdealProvider
+from .ompfinex import OmpfinexProvider
+from .okex import OkexProvider
 
 __all__ = [
     "Provider",
-    "NobitexOTCProvider",
-    "NobitexP2PProvider",
-    "WallexOTCProvider",
-    "WallexP2PProvider",
-    "BitpinOTCProvider",
-    "BitpinP2PProvider",
-    "RamzinexOTCProvider",
-    "RamzinexP2PProvider",
-    "ExirP2PProvider",
-    "AbanTetherOTCProvider",
+    "NobitexProvider",
+    "WallexProvider",
+    "BitpinProvider",
+    "RamzinexProvider",
+    "ExirProvider",
+    "AbanTetherProvider",
+    "TabdealProvider",
+    "OmpfinexProvider",
+    "OkexProvider",
 ]

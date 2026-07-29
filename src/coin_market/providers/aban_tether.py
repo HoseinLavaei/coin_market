@@ -2,42 +2,42 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Coins, Quote
+from ..coin import Coin, Quote, Base, Coins, OrderBooks
 from ..provider_name import ProviderName
 
 
-class AbanTetherOTCProvider:
-    provider_name = ProviderName.ABAN_TETHER_OTC
+class AbanTetherProvider:
+    provider_name = ProviderName.ABAN_TETHER
     """AbanTether exchange OTC API provider.
 
     Supports Iranian Rial (IRT) markets.
     """
 
     @classmethod
-    async def fetch(cls, quote: Quote = Quote.RLS) -> Coins:
+    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
         json = await get_json("https://api.abantether.com/api/v1/manager/otc/ticker")
         markets = json["data"]["markets"]
-        coins_data = []
-        
-        # AbanTether API returns prices in Toman (IRT).
-        multiplier = 1
-        match quote:
-            case Quote.RLS:
-                multiplier = 10
-            case _:
-                # Handle other quotes if supported by API, but currently it's IRT based.
-                # For ,now we only support RLS derived from their IRC prices.
-                pass
+        pairs = [(quote, base) for quote in quotes for base in bases]
+        result:Coins = Coins()
+        for quote, base in pairs:
+            match quote:
+                case Quote.RLS:
+                    multiplier = 10
+                    data = markets[str(base.value) + "IRT"]
+                case _:
+                    multiplier = 1
+                    data = markets[str(base.value) + str(quote.value)]
+            coin = Coin(
+                provider=cls.provider_name,
+                quote=quote,
+                base=base,
+                buy_price=Decimal(str(data["buy_price"])) * multiplier,
+                sell_price=Decimal(str(data["sell_price"])) * multiplier,
+                timestamp=datetime.datetime.now(datetime.timezone.utc),
+            )
+            result.upsert(coin)
+        return result
 
-        for market in markets.values():
-            if not market["active"]:
-                continue
-            coins_data.append({
-                "provider": cls.provider_name,
-                "quote": quote,
-                "base": market["symbol"],
-                "buy_price": Decimal(str(market["buy_price"])) * multiplier,
-                "sell_price": Decimal(str(market["sell_price"])) * multiplier,
-                "timestamp" : datetime.datetime.now(datetime.timezone.utc),
-            })
-        return Coins.from_list(coins_data)
+    @classmethod
+    async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
+        return OrderBooks()

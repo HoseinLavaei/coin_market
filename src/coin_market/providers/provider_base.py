@@ -1,9 +1,8 @@
-from typing import Protocol
-
+from typing import Protocol, runtime_checkable
 import httpx
 
 from .. import ProviderName
-from ..coin import Coins, Quote
+from ..coin import Quote, Base, OrderBooks, Coins
 
 
 async def get_json(url: str, params: dict[str, str] | None = None) -> dict:
@@ -16,7 +15,10 @@ async def get_json(url: str, params: dict[str, str] | None = None) -> dict:
         raise RuntimeError(f"API error: {e}") from e
 
 
+@runtime_checkable
 class Provider(Protocol):
     provider_name: ProviderName
     @classmethod
-    async def fetch(cls, quote: Quote) -> Coins: ...
+    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins: ...
+    @classmethod
+    async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks: ...

@@ -7,9 +7,8 @@ from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks
 from ..provider_name import ProviderName
 
 
-class ExirProvider:
-    provider_name = ProviderName.EXIR
-    """Exir exchange API provider."""
+class OmpfinexProvider:
+    provider_name = ProviderName.OMPFINEX
 
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
@@ -18,44 +17,37 @@ class ExirProvider:
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
         """
-        Fetch order books from Exir for the given quote/base pairs.
-        Uses the public /v2/orderbook endpoint.
+        Fetch spot order books from Ompfinex.
+        Uses /v1/market endpoint to get market IDs, then /v1/market/{id}/depth for order books.
         """
-        # Build a list of (quote, base) pairs to fetch
-        pairs = [(quote, base) for quote in quotes for base in bases]
-        semaphore = asyncio.Semaphore(2)
-        result = OrderBooks()
+        # 1. Fetch all available markets
+        markets_json = await get_json("https://api.ompfinex.com/v1/market")
+        if markets_json.get("status") != "OK":
+            return OrderBooks()
 
-        async def fetch_pair(quote: Quote, base: Base):
-            # Map quote to Exir's currency string and multiplier
-            if quote == Quote.RLS:
-                quote_str = "irt"
-                multiplier = 10
-            elif quote == Quote.USD:
-                quote_str = "usdt"
-                multiplier = 1
-            else:
-                return None  # Unsupported quote
+        # 2. Build market map: (quote_currency_id, base_currency_id) -> market_id
+        market_map = {}
+        for market in markets_json.get("data", []):
+            quote_id = market["quote_currency"]["id"]  # e.g., "IRR"
+            base_id = market["base_currency"]["id"]    # e.g., "USDT"
+            market_map[(quote_id, base_id)] = market["id"]
 
-            pair_name = f"{base.value.lower()}-{quote_str}"  # e.g., "btc-usdt"
+        semaphore = asyncio.Semaphore(5)
 
+        async def fetch_orderbook(market_id: int, base: Base, quote: Quote, multiplier: int):
             async with semaphore:
                 try:
-                    json_data = await get_json(
-                        "https://api.exir.io/v2/orderbook",
-                        params={"symbol": pair_name}
-                    )
-                    data = json_data.get(pair_name)
-                    if not data or not isinstance(data, dict):
+                    data = await get_json(f"https://api.ompfinex.com/v1/market/{market_id}/depth", {"limit":"200"})
+
+                    if data.get("status") != "OK":
                         return None
 
-                    bids_raw = data.get("bids", [])  # list of [price, amount]
-                    asks_raw = data.get("asks", [])  # list of [price, amount]
+                    result_data = data.get("data", {})
+                    bids_raw = result_data.get("bids", [])  # list of [price, amount]
+                    asks_raw = result_data.get("asks", [])  # list of [price, amount]
                     now = datetime.datetime.now(datetime.timezone.utc)
 
                     # ---- Build BIDS list ----
-                    # For each bid, both buy_price and sell_price are set to the bid price.
-                    # get_by_volume uses coin.buy_price when consuming bids.
                     bids_list = [
                         (
                             Coin(
@@ -72,8 +64,6 @@ class ExirProvider:
                     ]
 
                     # ---- Build ASKS list ----
-                    # For each ask, both prices are set to the ask price.
-                    # get_by_volume uses coin.sell_price when consuming asks.
                     asks_list = [
                         (
                             Coin(
@@ -89,21 +79,38 @@ class ExirProvider:
                         for price, amount in asks_raw
                     ]
 
-                    # Return a tuple of (key, OrderBook)
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
                 except Exception:
-                    # Optionally log the error here
                     return None
 
-        # Run all fetch tasks concurrently
-        tasks = [fetch_pair(quote, base) for quote, base in pairs]
+        # 3. Build tasks
+        tasks = []
+        for quote in quotes:
+            # Map quote to Ompfinex's currency ID
+            if quote == Quote.RLS:
+                quote_id = "IRR"
+                multiplier = 1  # API already returns in IRR (Toman)
+            elif quote == Quote.USD:
+                quote_id = "USDT"
+                multiplier = 1
+            else:
+                continue  # Unsupported quote
+
+            for base in bases:
+                base_id = base.value  # e.g., "BTC", "USDT"
+                market_id = market_map.get((quote_id, base_id))
+                if market_id is not None:
+                    tasks.append(fetch_orderbook(market_id, base, quote, multiplier))
+
+        # 4. Run all tasks concurrently
         results = await asyncio.gather(*tasks)
 
-        # Aggregate successful results
+        # 5. Aggregate successful results
+        final_result = OrderBooks()
         for r in results:
             if r is not None:
                 _, orderbook = r
-                result.upsert(orderbook)
+                final_result.upsert(orderbook)
 
-        return result
+        return final_result
