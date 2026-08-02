@@ -3,7 +3,7 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks
+from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks, Order
 from ..provider_name import ProviderName
 
 
@@ -49,8 +49,8 @@ class OmpfinexProvider:
 
                     # ---- Build BIDS list ----
                     bids_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -58,15 +58,15 @@ class OmpfinexProvider:
                                 sell_price=Decimal(str(price)) * multiplier,
                                 timestamp=now,
                             ),
-                            Decimal(str(amount)),
+                            quantity=Decimal(str(amount)),
                         )
                         for price, amount in bids_raw
                     ]
 
                     # ---- Build ASKS list ----
                     asks_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -74,7 +74,7 @@ class OmpfinexProvider:
                                 sell_price=Decimal(str(price)) * multiplier,
                                 timestamp=now,
                             ),
-                            Decimal(str(amount)),
+                            quantity=Decimal(str(amount)),
                         )
                         for price, amount in asks_raw
                     ]

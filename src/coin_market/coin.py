@@ -89,10 +89,18 @@ class Coins(BaseModel):
 
         return "\n\n".join(str(coin) for coin in self.coins.values())
 
+class Order(BaseModel):
+    coin: Coin
+    quantity: Decimal
+
+    def to_timezone(self, tz:tzinfo) -> Order:
+        return Order(coin=self.coin.to_timezone(tz),quantity=self.quantity)
+    def __str__(self) -> str:
+        return f"{self.coin}, {self.quantity} available"
 
 class OrderBook(BaseModel):
-    asks: list[tuple[Coin, Decimal]]
-    bids: list[tuple[Coin, Decimal]]
+    asks: list[Order]
+    bids: list[Order]
 
     def get_by_volume(self, volume: Decimal) -> Coin:
         """
@@ -112,14 +120,11 @@ class OrderBook(BaseModel):
         total_buy_volume = Decimal('0')
         remaining_buy = volume
 
-
-
-        # TODO
-        for coin, amount in self.asks:
+        for order in self.asks:
             if remaining_buy <= 0:
                 break
-            take = min(amount, remaining_buy)
-            total_buy_value += coin.sell_price * take
+            take = min(order.quantity, remaining_buy)
+            total_buy_value += order.coin.sell_price * take
             total_buy_volume += take
             remaining_buy -= take
 
@@ -132,11 +137,11 @@ class OrderBook(BaseModel):
         total_sell_volume = Decimal('0')
         remaining_sell = volume
 
-        for coin, amount in self.bids:
+        for order in self.bids:
             if remaining_sell <= 0:
                 break
-            take = min(amount, remaining_sell)
-            total_sell_value += coin.buy_price * take
+            take = min(order.quantity, remaining_sell)
+            total_sell_value += order.coin.buy_price * take
             total_sell_volume += take
             remaining_sell -= take
 
@@ -145,7 +150,7 @@ class OrderBook(BaseModel):
         avg_sell = total_sell_value / total_sell_volume
 
         # Build and return the result
-        first_coin = self.asks[0][0] if self.asks else self.bids[0][0]
+        first_coin = self.asks[0].coin if self.asks else self.bids[0].coin
         return Coin(
             provider=first_coin.provider,
             base=first_coin.base,
@@ -157,40 +162,40 @@ class OrderBook(BaseModel):
 
     def get_provider(self) -> ProviderName:
         if self.asks:
-            return self.asks[0][0].provider
+            return self.asks[0].coin.provider
         elif self.bids:
-            return self.bids[0][0].provider
+            return self.bids[0].coin.provider
         else:
             raise ValueError("Order book is empty")
 
     def get_quote(self) -> Quote:
         if self.asks:
-            return self.asks[0][0].quote
+            return self.asks[0].coin.quote
         elif self.bids:
-            return self.bids[0][0].quote
+            return self.bids[0].coin.quote
         else:
             raise ValueError("Order book is empty")
 
     def get_base(self) -> Base:
         if self.asks:
-            return self.asks[0][0].base
+            return self.asks[0].coin.base
         elif self.bids:
-            return self.bids[0][0].base
+            return self.bids[0].coin.base
         else:
             raise ValueError("Order book is empty")
 
-    def to_timezone(self, tz: tzinfo) -> "OrderBook":
+    def to_timezone(self, tz: tzinfo) -> OrderBook:
         """Returns a new OrderBook instance with all timestamps converted to the given timezone."""
-        new_asks = [(coin.to_timezone(tz), amount) for coin, amount in self.asks]
-        new_bids = [(coin.to_timezone(tz), amount) for coin, amount in self.bids]
+        new_asks:list[Order] = [order.to_timezone(tz) for order in self.asks]
+        new_bids:list[Order] = [order.to_timezone(tz) for order in self.bids]
         return OrderBook(asks=new_asks, bids=new_bids)
 
     def __str__(self) -> str:
         if not self.asks and not self.bids:
             return "OrderBook(empty)"
 
-        total_ask_vol = sum(amt for _, amt in self.asks)
-        total_bid_vol = sum(amt for _, amt in self.bids)
+        total_ask_vol = sum(order.quantity for order in self.asks)
+        total_bid_vol = sum(order.quantity for order in self.bids)
 
         # Base summary
         summary = (
@@ -202,10 +207,11 @@ class OrderBook(BaseModel):
         try:
             vwap_coin = self.get_by_volume(Decimal('1'))
             return f"{summary}\n  VWAP for 1.0 base: {vwap_coin}"
-        except Exception:
+        except Exception as e:
+            print(f"The book has no volume:{e}")
             # Fallback: show best bid/ask if VWAP fails (e.g., book has no volume)
-            best_ask = self.asks[0][0].sell_price if self.asks else None
-            best_bid = self.bids[0][0].buy_price if self.bids else None
+            best_ask = self.asks[0].coin.sell_price if self.asks else None
+            best_bid = self.bids[0].coin.buy_price if self.bids else None
             return f"{summary}\n  Best Ask: {best_ask}, Best Bid: {best_bid}"
 
 class OrderBooks(BaseModel):
@@ -223,7 +229,7 @@ class OrderBooks(BaseModel):
     def get_key_from_details(provider: ProviderName, quote: Quote, base: Base) -> tuple[ProviderName, Quote, Base]:
         return provider, quote, base
 
-    def to_timezone(self, tz: tzinfo) -> "OrderBooks":
+    def to_timezone(self, tz: tzinfo) -> OrderBooks:
         """Returns a new OrderBooks instance with all timestamps converted to the given timezone."""
         result = OrderBooks()
         for book in self.books.values():

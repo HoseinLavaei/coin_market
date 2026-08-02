@@ -3,7 +3,7 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks
+from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks, Order
 from ..provider_name import ProviderName
 
 
@@ -69,7 +69,7 @@ class TabdealProvider:
                             sell_price=price,  # get_by_volume uses sell_price for asks
                             timestamp=now,
                         )
-                        asks_list.append((coin, amount))
+                        asks_list.append(Order(coin=coin, quantity=amount))
 
                     # ---- Build BIDS (to_amount_data) ----
                     # Each entry: {"price": "192080", "amount": "9644999.999..."}
@@ -78,12 +78,7 @@ class TabdealProvider:
                     bids_list = []
                     for entry in to_data:
                         price = Decimal(str(entry["price"])) * multiplier
-                        irt_amount = Decimal(str(entry["amount"]))
-                        # Convert IRT amount to USDT amount
-                        if price > 0:
-                            usdt_amount = irt_amount / price
-                        else:
-                            continue
+                        amount = Decimal(str(entry["amount"]))
                         coin = Coin(
                             provider=cls.provider_name,
                             base=base,
@@ -92,16 +87,17 @@ class TabdealProvider:
                             sell_price=price,  # get_by_volume uses buy_price for bids
                             timestamp=now,
                         )
-                        bids_list.append((coin, usdt_amount))
+                        bids_list.append(Order(coin=coin, quantity=amount))
 
                     # Sort asks: lowest price first (standard)
-                    asks_list.sort(key=lambda x: x[0].sell_price)
+                    asks_list.sort(key=lambda x: x.coin.sell_price)
                     # Sort bids: highest price first (standard)
-                    bids_list.sort(key=lambda x: x[0].buy_price, reverse=True)
+                    bids_list.sort(key=lambda x: x.coin.buy_price, reverse=True)
 
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
-                except Exception:
+                except Exception as e:
+                    print(f"Cant get tabdeal's Orderbook:{e}")
                     return None
 
         # Build tasks for all requested pairs
@@ -114,7 +110,7 @@ class TabdealProvider:
 
         for r in results:
             if r is not None:
-                _, orderbook = r
+                (_, _), orderbook = r
                 result.upsert(orderbook)
 
         return result

@@ -3,7 +3,7 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks
+from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks, Order
 from ..provider_name import ProviderName
 
 
@@ -117,8 +117,8 @@ async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provide
 
             # Build asks: each coin has both prices set to the ask price
             asks_list = [
-                (
-                    Coin(
+                Order(
+                    coin=Coin(
                         provider=provider_name,
                         base=base,
                         quote=quote,
@@ -126,15 +126,15 @@ async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provide
                         sell_price=Decimal(str(price)) * multiplier,
                         timestamp=now,
                     ),
-                    Decimal(str(amount)),
+                    quantity=Decimal(str(amount)),
                 )
                 for price, amount in asks_raw
             ]
 
             # Build bids: each coin has both prices set to the bid price
             bids_list = [
-                (
-                    Coin(
+                Order(
+                    coin=Coin(
                         provider=provider_name,
                         base=base,
                         quote=quote,
@@ -142,13 +142,14 @@ async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provide
                         sell_price=Decimal(str(price)) * multiplier,
                         timestamp=now,
                     ),
-                    Decimal(str(amount)),
+                    quantity=Decimal(str(amount)),
                 )
                 for price, amount in bids_raw
             ]
 
             return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
-        except Exception:
+        except Exception as e:
             # Log the error here if you have logging set up
+            print(f"Cant fetch bitpin's Orderbook:{e}")
             return None

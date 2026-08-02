@@ -3,7 +3,7 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks
+from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks, Order
 from ..provider_name import ProviderName
 
 
@@ -137,7 +137,7 @@ class RamzinexProvider:
                             sell_price=price,
                             timestamp=now,
                         )
-                        bids_list.append((coin, amount))
+                        bids_list.append(Order(coin=coin, quantity=amount))
 
                     # ---- Build ASKS list ----
                     asks_list = []
@@ -157,7 +157,7 @@ class RamzinexProvider:
                             sell_price=price,
                             timestamp=now,
                         )
-                        asks_list.append((coin, amount))
+                        asks_list.append(Order(coin=coin, quantity=amount))
 
                     # If both sides are empty, return None (no useful data)
                     if not bids_list and not asks_list:
@@ -166,6 +166,7 @@ class RamzinexProvider:
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
                 except Exception as e:
+                    print(f"Can't get Ramzinex's Orderbook:{e}")
                     # Log the error for debugging
                     # logger.error(f"Failed to fetch orderbook for pair_id {pair_id}: {e}")
                     return None

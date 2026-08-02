@@ -3,7 +3,7 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks
+from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks, Order
 from ..provider_name import ProviderName
 
 
@@ -81,8 +81,8 @@ class NobitexProvider:
                     # For each bid, both buy_price and sell_price are set to the bid price.
                     # get_by_volume uses coin.buy_price when consuming bids.
                     bids_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -90,7 +90,7 @@ class NobitexProvider:
                                 sell_price=Decimal(str(price)),
                                 timestamp=now,
                             ),
-                            Decimal(str(amount)),
+                            quantity=Decimal(str(amount)),
                         )
                         for price, amount in bids_raw
                     ]
@@ -99,8 +99,8 @@ class NobitexProvider:
                     # For each ask, both prices are set to the ask price.
                     # get_by_volume uses coin.sell_price when consuming asks.
                     asks_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -108,14 +108,15 @@ class NobitexProvider:
                                 sell_price=Decimal(str(price)),
                                 timestamp=now,
                             ),
-                            Decimal(str(amount)),
+                            quantity=Decimal(str(amount)),
                         )
                         for price, amount in asks_raw
                     ]
 
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
-                except Exception:
+                except Exception as e:
+                    print(f"Cant get nobitex's Orderbook:{e}")
                     # Optionally log the error here
                     return None
 

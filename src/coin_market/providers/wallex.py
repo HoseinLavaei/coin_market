@@ -3,7 +3,7 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks
+from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks, Order
 from ..provider_name import ProviderName
 
 
@@ -111,8 +111,8 @@ class WallexProvider:
                     # For each bid, both buy_price and sell_price are set to the bid price.
                     # get_by_volume uses coin.buy_price when consuming bids.
                     bids_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -120,7 +120,7 @@ class WallexProvider:
                                 sell_price=Decimal(str(b["price"])) * multiplier,
                                 timestamp=now,
                             ),
-                            Decimal(str(b["quantity"])),
+                            quantity=Decimal(str(b["quantity"])),
                         )
                         for b in bids_raw
                     ]
@@ -129,8 +129,8 @@ class WallexProvider:
                     # For each ask, both prices are set to the ask price.
                     # get_by_volume uses coin.sell_price when consuming asks.
                     asks_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -138,7 +138,7 @@ class WallexProvider:
                                 sell_price=Decimal(str(a["price"])) * multiplier,
                                 timestamp=now,
                             ),
-                            Decimal(str(a["quantity"])),
+                            quantity=Decimal(str(a["quantity"])),
                         )
                         for a in asks_raw
                     ]

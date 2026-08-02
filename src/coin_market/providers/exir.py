@@ -3,7 +3,7 @@ import datetime
 from decimal import Decimal
 
 from .provider_base import get_json
-from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks
+from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks, Order
 from ..provider_name import ProviderName
 
 
@@ -57,8 +57,8 @@ class ExirProvider:
                     # For each bid, both buy_price and sell_price are set to the bid price.
                     # get_by_volume uses coin.buy_price when consuming bids.
                     bids_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -66,7 +66,7 @@ class ExirProvider:
                                 sell_price=Decimal(str(price)) * multiplier,
                                 timestamp=now,
                             ),
-                            Decimal(str(amount)),
+                            quantity=Decimal(str(amount)),
                         )
                         for price, amount in bids_raw
                     ]
@@ -75,8 +75,8 @@ class ExirProvider:
                     # For each ask, both prices are set to the ask price.
                     # get_by_volume uses coin.sell_price when consuming asks.
                     asks_list = [
-                        (
-                            Coin(
+                        Order(
+                            coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
@@ -84,7 +84,7 @@ class ExirProvider:
                                 sell_price=Decimal(str(price)) * multiplier,
                                 timestamp=now,
                             ),
-                            Decimal(str(amount)),
+                            quantity=Decimal(str(amount)),
                         )
                         for price, amount in asks_raw
                     ]
@@ -92,8 +92,9 @@ class ExirProvider:
                     # Return a tuple of (key, OrderBook)
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
-                except Exception:
+                except Exception as e:
                     # Optionally log the error here
+                    print(f"Cant get exir's Orderbook:{e}")
                     return None
 
         # Run all fetch tasks concurrently
