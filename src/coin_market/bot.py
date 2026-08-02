@@ -18,6 +18,7 @@ from .providers.ompfinex import OmpfinexProvider
 from .providers.ramzinex import RamzinexProvider
 from .providers.tabdeal import TabdealProvider
 from .providers.wallex import WallexProvider
+from .db import init_db, load_latest_snapshot, save_snapshot, close_db
 
 # ─── Global cache ─────────────────────────────────────────────
 _cached_coins: Coins = Coins()
@@ -77,7 +78,7 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
 # ─── Cache update + broadcast ──────────────────────────────
 
 async def update_cache(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fetch fresh data, update cache, and broadcast to group."""
+    """Fetch fresh data, update cache, save to database, and broadcast to group."""
     global _cached_coins, _cached_orderbooks, _cache_updated_at
 
     try:
@@ -86,8 +87,11 @@ async def update_cache(context: ContextTypes.DEFAULT_TYPE) -> None:
         _cached_orderbooks = books
         _cache_updated_at = datetime.now(TIMEZONE)
 
+        # Save to database
+        await save_snapshot(coins, books)
+
         timestamp = _cache_updated_at.strftime('%H:%M:%S')
-        print(f"[{timestamp}] Cache updated successfully.")
+        print(f"[{timestamp}] Cache updated successfully and saved to DB.")
 
         if GROUP_ID:
             msg = (
@@ -103,13 +107,14 @@ async def update_cache(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ─── Command handlers ────────────────────────────────────────
 
-def parse_price_filters(args: list[str]) -> tuple[ProviderName | None, str | None]:
-    """Parse command arguments to extract provider and type filters.
+def parse_price_filters(args: list[str]) -> tuple[ProviderName | None, str | None, float | None]:
+    """Parse command arguments to extract provider, type, and volume filters.
     
     Raises ValueError if arguments are invalid.
     """
     provider_filter: ProviderName | None = None
     type_filter: str | None = None
+    volume_filter: float | None = None
 
     valid_providers = {p.name.lower(): p for p in ProviderName}
     valid_types = {"otc", "p2p"}
@@ -121,9 +126,12 @@ def parse_price_filters(args: list[str]) -> tuple[ProviderName | None, str | Non
         elif arg_lower in valid_types:
             type_filter = arg_lower.upper()
         else:
-            raise ValueError(arg)
+            try:
+                volume_filter = float(arg)
+            except ValueError:
+                raise ValueError(arg)
 
-    return provider_filter, type_filter
+    return provider_filter, type_filter, volume_filter
 
 
 def build_filter_description(provider_filter: ProviderName | None, type_filter: str | None) -> str:
@@ -140,8 +148,11 @@ def build_prices_output(
     coins: Coins,
     books: OrderBooks,
     type_filter: str | None,
+    volume: float | None = None,
 ) -> str:
-    """Build the prices message based on type filter."""
+    """Build the prices message based on type filter and optional volume for OrderBooks."""
+    from decimal import Decimal
+    
     lines = []
     
     if type_filter == "OTC" or type_filter is None:
@@ -151,7 +162,11 @@ def build_prices_output(
         lines.append("")
     
     if type_filter == "P2P" or type_filter is None:
-        lines.append(f"Order books (P2P):\n{books}")
+        if volume is not None:
+            orderbooks_str = books.to_string(Decimal(str(volume)))
+        else:
+            orderbooks_str = str(books)
+        lines.append(f"Order books (P2P):\n{orderbooks_str}")
     
     return "\n".join(lines)
 
@@ -168,34 +183,42 @@ async def send_message_chunked(update: Update, text: str) -> None:
 
 
 async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Reply with prices, optionally filtered by provider and/or type.
+    """Reply with prices, optionally filtered by provider and/or type, with optional volume.
     
     Usage:
-        /prices                          - all prices
-        /prices aban_tether              - specific provider
-        /prices otc                      - specific type
-        /prices aban_tether otc          - provider and type
-        /prices otc aban_tether          - order doesn't matter
+        /prices                              - all prices
+        /prices aban_tether                  - specific provider
+        /prices otc                          - specific type
+        /prices aban_tether otc              - provider and type
+        /prices otc aban_tether              - order doesn't matter
+        /prices 100                          - all prices with VWAP for volume 100
+        /prices aban_tether 50               - provider with VWAP for volume 50
+        /prices p2p 25.5                     - P2P only with VWAP for volume 25.5
+    
+    Note: Volume argument is only used for OrderBooks (P2P).
     """
     if update.message is None or context.args is None:
         return
     try:
-        provider_filter, type_filter = parse_price_filters(context.args)
+        provider_filter, type_filter, volume = parse_price_filters(context.args)
     except ValueError as e:
         await update.message.reply_text(
             f"Invalid argument: {e}\n"
             "Valid providers: " + ", ".join([p.value for p in ProviderName]) + "\n"
-            "Valid types: OTC, P2P"
+            "Valid types: OTC, P2P\n"
+            "Volume: any positive number (for OrderBooks only)"
         )
         return
 
     filter_desc = build_filter_description(provider_filter, type_filter)
+    if volume is not None:
+        filter_desc += f" + volume {volume}"
     timestamp = _cache_updated_at.strftime('%H:%M:%S')
     
     coins_to_show = filter_coins_by_provider(_cached_coins, provider_filter) if provider_filter else _cached_coins
     books_to_show = filter_orderbooks_by_provider(_cached_orderbooks, provider_filter) if provider_filter else _cached_orderbooks
     
-    prices_output = build_prices_output(coins_to_show, books_to_show, type_filter)
+    prices_output = build_prices_output(coins_to_show, books_to_show, type_filter, volume)
     msg = f"Market data ({filter_desc}, updated at {timestamp})\n\n{prices_output}"
     
     await send_message_chunked(update, msg)
@@ -225,6 +248,39 @@ async def run_bot():
     if not TELEGRAM_TOKEN:
         print("Error: TELEGRAM_TOKEN environment variable not set.")
         sys.exit(1)
+
+    # Initialize database with retries
+    print("Initializing database...")
+    max_retries = 10
+    initial_delay = 10  # Wait 10 seconds before first attempt
+    
+    await asyncio.sleep(initial_delay)
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            await init_db()
+            break
+        except Exception as e:
+            if attempt == max_retries:
+                print(f"Error: Failed to initialize database after {max_retries} attempts: {e}")
+                sys.exit(1)
+            print(f"Attempt {attempt}/{max_retries}: Database not ready, retrying in 5s...")
+            await asyncio.sleep(5)
+
+    # Load latest snapshot from database
+    print("Loading latest market data from database...")
+    global _cached_coins, _cached_orderbooks, _cache_updated_at
+    try:
+        snapshot = await load_latest_snapshot()
+        if snapshot:
+            _cached_coins, _cached_orderbooks = snapshot
+            _cache_updated_at = datetime.now(TIMEZONE)
+            timestamp = _cache_updated_at.strftime('%H:%M:%S')
+            print(f"[{timestamp}] Loaded {len(_cached_coins.coins)} coins and {len(_cached_orderbooks.books)} orderbooks from DB.")
+        else:
+            print("No previous data in database. Will fetch on first update.")
+    except Exception as e:
+        print(f"Warning: Could not load snapshot: {e}")
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -258,3 +314,4 @@ async def run_bot():
             await app.updater.stop()
         await app.stop()
         await app.shutdown()
+        await close_db()

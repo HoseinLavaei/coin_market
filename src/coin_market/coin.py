@@ -179,7 +179,7 @@ class OrderBook(BaseModel):
         new_bids:list[Order] = [order.to_timezone(tz) for order in self.bids]
         return OrderBook(asks=new_asks, bids=new_bids)
 
-    def __str__(self) -> str:
+    def to_string(self, volume:Decimal) -> str:
         if not self.asks and not self.bids:
             return "OrderBook(empty)"
 
@@ -194,7 +194,7 @@ class OrderBook(BaseModel):
 
         # Try to show VWAP for 1 unit of the base asset (e.g., 1 BTC, 1 USDT, etc.)
         try:
-            vwap_coin = self.get_by_volume(Decimal('1'))
+            vwap_coin = self.get_by_volume(volume)
             return f"{summary}\n  VWAP for 1.0 base: {vwap_coin}"
         except Exception as e:
             print(f"The book has no volume:{e}")
@@ -202,6 +202,8 @@ class OrderBook(BaseModel):
             best_ask = self.asks[0].coin.sell_price if self.asks else None
             best_bid = self.bids[0].coin.buy_price if self.bids else None
             return f"{summary}\n  Best Ask: {best_ask}, Best Bid: {best_bid}"
+    def __str__(self) -> str:
+        return self.to_string(Decimal(1))
 
 class OrderBooks(BaseModel):
     books: dict[tuple[ProviderName, Quote, Base], OrderBook] = Field(default_factory=dict)
@@ -224,14 +226,17 @@ class OrderBooks(BaseModel):
         for book in self.books.values():
             result.upsert(book.to_timezone(tz))  # Now works with new OrderBook
         return result
-
-    def __str__(self) -> str:
+    def to_string(self, volume: Decimal) -> str:
+        """Convert OrderBooks to string with VWAP calculated for given volume."""
         if not self.books:
             return "OrderBooks(empty)"
 
         lines = []
         for (provider, quote, base), book in self.books.items():
             # Indent the multi-line book string
-            book_str = str(book).replace("\n", "\n  ")
+            book_str = book.to_string(volume).replace("\n", "\n  ")
             lines.append(f"{provider.value}/{quote.value}/{base.value}:\n  {book_str}")
         return "OrderBooks:\n" + "\n\n".join(lines)
+    def __str__(self) -> str:
+        return self.to_string(Decimal(1))
+
