@@ -11,106 +11,82 @@ class TabdealProvider:
     provider_name = ProviderName.TABDEAL
 
     @classmethod
-    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
+    async def get_otc(cls, _quotes: list[Quote], _bases: list[Base]) -> Coins:
         return Coins()
 
     @classmethod
+    def _get_quote_mapping(cls, quote: Quote) -> tuple[str, int] | None:
+        """Map Quote enum to Tabdeal currency code and multiplier."""
+        if quote == Quote.RLS:
+            return "IRT", 1
+        elif quote == Quote.USD:
+            return "USDT", 1
+        return None
+
+    @classmethod
+    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime, reverse: bool = False) -> list[Order]:
+        """Build Order list from price/amount entries."""
+        orders = []
+        for entry in entries:
+            price = Decimal(str(entry["price"])) * mult
+            amount = Decimal(str(entry["amount"]))
+            coin = Coin(
+                provider=cls.provider_name,
+                base=b,
+                quote=q,
+                buy_price=price,
+                sell_price=price,
+                timestamp=now,
+            )
+            orders.append(Order(coin=coin, quantity=amount))
+
+        # Sort: asks ascending (lowest first), bids descending (highest first)
+        orders.sort(key=lambda x: x.coin.sell_price, reverse=reverse)
+        return orders
+
+    @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
-        """
-        Fetch P2P order book from Tabdeal.
-        API returns tier-based prices with amounts.
-        """
+        """Fetch P2P order book from Tabdeal."""
         result = OrderBooks()
         semaphore = asyncio.Semaphore(5)
 
-        async def fetch_pair(quote: Quote, base: Base):
-            # Map to Tabdeal's currency codes
-            if quote == Quote.RLS:
-                to_currency = "IRT"
-                multiplier = 1  # API already returns IRT
-            elif quote == Quote.USD:
-                to_currency = "USDT"
-                multiplier = 1
-            else:
-                return None  # Unsupported quote
-
-            from_currency = base.value  # e.g., "BTC", "USDT"
-
-            # Tabdeal only supports USDT pairs for now, but we keep the base flexible
-            url = (
-                f"https://api-web.tabdeal.org/r/swap/prices_zero_commission_tier_based/"
-            )
+        async def fetch_pair(q: Quote, b: Base, to_curr: str, mult: int):
+            from_curr = b.value
+            url = "https://api-web.tabdeal.org/r/swap/prices_zero_commission_tier_based/"
 
             async with semaphore:
                 try:
-                    data = await get_json(url,{"from_currency":from_currency, "to_currency":to_currency})
-
-                    # The API returns data even for unsupported pairs (empty arrays)
-                    from_data = data.get("from_amount_data", [])
-                    to_data = data.get("to_amount_data", [])
-
-                    if not from_data and not to_data:
-                        return None
-
-                    now = datetime.datetime.now(datetime.timezone.utc)
-
-                    # ---- Build ASKS (from_amount_data) ----
-                    # Each entry: {"price": "192080", "amount": "50"}
-                    # price = IRT per 1 USDT, amount = USDT available at that price
-                    asks_list = []
-                    for entry in from_data:
-                        price = Decimal(str(entry["price"])) * multiplier
-                        amount = Decimal(str(entry["amount"]))
-                        coin = Coin(
-                            provider=cls.provider_name,
-                            base=base,
-                            quote=quote,
-                            buy_price=price,   # Both set to same price for order book
-                            sell_price=price,  # get_by_volume uses sell_price for asks
-                            timestamp=now,
-                        )
-                        asks_list.append(Order(coin=coin, quantity=amount))
-
-                    # ---- Build BIDS (to_amount_data) ----
-                    # Each entry: {"price": "192080", "amount": "9644999.999..."}
-                    # price = IRT per 1 USDT, amount = IRT available at that price
-                    # Convert IRT amount to USDT amount: usdt_amount = irt_amount / price
-                    bids_list = []
-                    for entry in to_data:
-                        price = Decimal(str(entry["price"])) * multiplier
-                        amount = Decimal(str(entry["amount"]))
-                        coin = Coin(
-                            provider=cls.provider_name,
-                            base=base,
-                            quote=quote,
-                            buy_price=price,   # Both set to same price for order book
-                            sell_price=price,  # get_by_volume uses buy_price for bids
-                            timestamp=now,
-                        )
-                        bids_list.append(Order(coin=coin, quantity=amount))
-
-                    # Sort asks: lowest price first (standard)
-                    asks_list.sort(key=lambda x: x.coin.sell_price)
-                    # Sort bids: highest price first (standard)
-                    bids_list.sort(key=lambda x: x.coin.buy_price, reverse=True)
-
-                    return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
-
-                except Exception as e:
-                    print(f"Cant get tabdeal's Orderbook:{e}")
+                    data = await get_json(url, {"from_currency": from_curr, "to_currency": to_curr})
+                except (OSError, ValueError, TimeoutError):
                     return None
 
-        # Build tasks for all requested pairs
+                from_data = data.get("from_amount_data", [])
+                to_data = data.get("to_amount_data", [])
+
+                if not from_data and not to_data:
+                    return None
+
+                now = datetime.datetime.now(datetime.timezone.utc)
+                asks_list = cls._build_order_list(from_data, mult, q, b, now, reverse=False)
+                bids_list = cls._build_order_list(to_data, mult, q, b, now, reverse=True)
+
+                return (q, b), OrderBook(asks=asks_list, bids=bids_list)
+
         tasks = []
         for quote in quotes:
+            mapping = cls._get_quote_mapping(quote)
+            if not mapping:
+                continue
+
+            to_currency, multiplier = mapping
             for base in bases:
-                tasks.append(fetch_pair(quote, base))
+                tasks.append(fetch_pair(quote, base, to_currency, multiplier))
 
         results = await asyncio.gather(*tasks)
 
-        for r in results:
-            if r is not None:
-                (_, _), orderbook = r
+        for result_item in results:
+            if result_item is not None:
+                _, orderbook = result_item
                 result.upsert(orderbook)
 
         return result

@@ -12,165 +12,158 @@ class WallexProvider:
     provider_name = ProviderName.WALLEX
 
     @classmethod
+    def _get_quote_mapping(cls, quote: Quote) -> tuple[str, int] | None:
+        """Map Quote enum to Wallex currency code and multiplier."""
+        if quote == Quote.RLS:
+            return "TMN", 10
+        elif quote == Quote.USD:
+            return "USDT", 1
+        return None
+
+    @classmethod
+    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime, key: str = "price") -> list[Order]:
+        """Build Order list from price/quantity entries."""
+        return [
+            Order(
+                coin=Coin(
+                    provider=cls.provider_name,
+                    base=b,
+                    quote=q,
+                    buy_price=Decimal(str(e[key])) * mult,
+                    sell_price=Decimal(str(e[key])) * mult,
+                    timestamp=now,
+                ),
+                quantity=Decimal(str(e["quantity"])),
+            )
+            for e in entries
+        ]
+
+    @classmethod
+    async def _fetch_otc_prices(cls, sem: asyncio.Semaphore, sym: str, b: Base, q: Quote, mult: int):
+        """Fetch OTC buy/sell prices for a symbol."""
+        async with sem:
+            try:
+                buy_task = get_json("https://api.wallex.ir/v1/otc/price", params={"symbol": sym, "side": "BUY"})
+                sell_task = get_json("https://api.wallex.ir/v1/otc/price", params={"symbol": sym, "side": "SELL"})
+                buy_res, sell_res = await asyncio.gather(buy_task, sell_task)
+            except (OSError, ValueError, TimeoutError):
+                return None
+
+            if not buy_res.get("success") or not sell_res.get("success"):
+                return None
+
+            try:
+                buy_price = Decimal(str(buy_res["result"]["price"]).rstrip("0").rstrip(",")) * mult
+                sell_price = Decimal(str(sell_res["result"]["price"]).rstrip("0").rstrip(",")) * mult
+            except (KeyError, ValueError, TypeError):
+                return None
+
+            price_coin = Coin(
+                provider=cls.provider_name,
+                base=b,
+                buy_price=buy_price,
+                sell_price=sell_price,
+                quote=q,
+                timestamp=datetime.datetime.now(datetime.timezone.utc),
+            )
+            return (q, b), price_coin
+
+    @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
-        """
-        Fetch OTC (over‑the‑counter) prices from Wallex.
-        Uses the /v1/otc/markets endpoint to list available pairs,
-        then fetches buy and sell prices concurrently with a semaphore.
-        """
-        # 1. Fetch available OTC markets
-        json_data = await get_json("https://api.wallex.ir/v1/otc/markets")
-        symbols = json_data.get("result", {})
+        """Fetch OTC prices from Wallex."""
+        try:
+            markets_data = await get_json("https://api.wallex.ir/v1/otc/markets")
+        except (OSError, ValueError, TimeoutError):
+            return Coins()
 
+        symbols = markets_data.get("result", {})
         semaphore = asyncio.Semaphore(5)
-
-        async def fetch_prices(symbol_name, base: Base, quote: Quote, multiplier):
-            async with semaphore:
-                try:
-                    # Fetch buy and sell prices concurrently
-                    buy_task = get_json(
-                        "https://api.wallex.ir/v1/otc/price",
-                        params={"symbol": symbol_name, "side": "BUY"}
-                    )
-                    sell_task = get_json(
-                        "https://api.wallex.ir/v1/otc/price",
-                        params={"symbol": symbol_name, "side": "SELL"}
-                    )
-
-                    buy_res, sell_res = await asyncio.gather(buy_task, sell_task)
-
-                    if not buy_res.get("success") or not sell_res.get("success"):
-                        return None
-
-                    buy_price = Decimal(str(buy_res["result"]["price"]).rstrip("0").rstrip(",")) * multiplier
-                    sell_price = Decimal(str(sell_res["result"]["price"]).rstrip("0").rstrip(",")) * multiplier
-
-                    coin = Coin(
-                        provider=cls.provider_name,
-                        base=base,
-                        buy_price=buy_price,
-                        sell_price=sell_price,
-                        quote=quote,
-                        timestamp=datetime.datetime.now(datetime.timezone.utc),
-                    )
-                    return (quote, base), coin
-
-                except Exception:
-                    return None
-
-        # Build tasks
         tasks = []
+
         for quote in quotes:
-            quote_string = "TMN" if quote == Quote.RLS else "USDT"
-            multiplier = 10 if quote == Quote.RLS else 1
+            mapping = cls._get_quote_mapping(quote)
+            if not mapping:
+                continue
+
+            quote_string, multiplier = mapping
             for base in bases:
                 symbol_name = f"{base.value}{quote_string}"
                 if symbol_name in symbols:
-                    tasks.append(fetch_prices(symbol_name, base, quote, multiplier))
+                    tasks.append(cls._fetch_otc_prices(semaphore, symbol_name, base, quote, multiplier))
 
-        # Run all tasks concurrently
         results = await asyncio.gather(*tasks)
 
-        # Aggregate results
         result = Coins()
-        for r in results:
-            if r is not None:
-                _, coin = r
-                result.upsert(coin)
+        for result_item in results:
+            if result_item is not None:
+                _, price_coin = result_item
+                result.upsert(price_coin)
 
         return result
 
     @classmethod
-    async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
-        """
-        Fetch spot order books from Wallex.
-        Uses the /v1/depth endpoint for each pair.
-        Now fully concurrent with a semaphore.
-        """
-        # 1. Fetch available markets to validate pairs
-        json_data = await get_json("https://api.wallex.ir/v1/markets")
-        symbols = json_data.get("result", {}).get("symbols", {})
+    async def _fetch_single_orderbook(cls, sem: asyncio.Semaphore, mkey: str, b: Base, q: Quote, mult: int):
+        """Fetch a single orderbook."""
+        async with sem:
+            try:
+                ob_data = await get_json("https://api.wallex.ir/v1/depth", params={"symbol": mkey})
+            except (OSError, ValueError, TimeoutError):
+                return None
 
-        semaphore = asyncio.Semaphore(5)
+            if not ob_data.get("success"):
+                return None
 
-        async def fetch_orderbook(market_key, base: Base, quote: Quote, multiplier):
-            async with semaphore:
-                try:
-                    ob_data = await get_json(
-                        "https://api.wallex.ir/v1/depth",
-                        params={"symbol": market_key}
-                    )
-                    if not ob_data.get("success"):
-                        return None
+            bids_raw = ob_data.get("result", {}).get("bid", [])
+            asks_raw = ob_data.get("result", {}).get("ask", [])
+            now = datetime.datetime.now(datetime.timezone.utc)
 
-                    bids_raw = ob_data.get("result", {}).get("bid", [])  # list of {price, quantity}
-                    asks_raw = ob_data.get("result", {}).get("ask", [])  # list of {price, quantity}
-                    now = datetime.datetime.now(datetime.timezone.utc)
+            bids_list = cls._build_order_list(bids_raw, mult, q, b, now)
+            asks_list = cls._build_order_list(asks_raw, mult, q, b, now)
 
-                    # ---- Build BIDS list ----
-                    # For each bid, both buy_price and sell_price are set to the bid price.
-                    # get_by_volume uses coin.buy_price when consuming bids.
-                    bids_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                buy_price=Decimal(str(b["price"])) * multiplier,
-                                sell_price=Decimal(str(b["price"])) * multiplier,
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(b["quantity"])),
-                        )
-                        for b in bids_raw
-                    ]
+            return (q, b), OrderBook(asks=asks_list, bids=bids_list)
 
-                    # ---- Build ASKS list ----
-                    # For each ask, both prices are set to the ask price.
-                    # get_by_volume uses coin.sell_price when consuming asks.
-                    asks_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                buy_price=Decimal(str(a["price"])) * multiplier,
-                                sell_price=Decimal(str(a["price"])) * multiplier,
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(a["quantity"])),
-                        )
-                        for a in asks_raw
-                    ]
+    @classmethod
+    def _should_fetch_orderbook(cls, stats: dict) -> bool:
+        """Check if orderbook should be fetched based on stats."""
+        return stats.get("lastPrice") != "-"
 
-                    return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
-
-                except Exception:
-                    return None
-
-        # Build tasks
+    @classmethod
+    def _build_orderbook_tasks(cls, sem: asyncio.Semaphore, symbols: dict, quotes: list[Quote], bases: list[Base]) -> list:
+        """Build list of orderbook fetch tasks."""
         tasks = []
         for quote in quotes:
-            quote_string = "TMN" if quote == Quote.RLS else "USDT"
-            multiplier = 10 if quote == Quote.RLS else 1
+            mapping = cls._get_quote_mapping(quote)
+            if not mapping:
+                continue
+
+            quote_string, multiplier = mapping
             for base in bases:
                 market_key = f"{base.value}{quote_string}"
-                # Check if the symbol exists in the market list
                 if market_key in symbols:
-                    # Optional: skip if stats["lastPrice"] is "-"
                     stats = symbols[market_key].get("stats", {})
-                    if stats.get("lastPrice") == "-":
-                        continue
-                    tasks.append(fetch_orderbook(market_key, base, quote, multiplier))
+                    if cls._should_fetch_orderbook(stats):
+                        tasks.append(cls._fetch_single_orderbook(sem, market_key, base, quote, multiplier))
 
-        # Run all tasks concurrently
+        return tasks
+
+    @classmethod
+    async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
+        """Fetch spot order books from Wallex."""
+        try:
+            markets_data = await get_json("https://api.wallex.ir/v1/markets")
+        except (OSError, ValueError, TimeoutError):
+            return OrderBooks()
+
+        symbols = markets_data.get("result", {}).get("symbols", {})
+        semaphore = asyncio.Semaphore(5)
+
+        tasks = cls._build_orderbook_tasks(semaphore, symbols, quotes, bases)
         results = await asyncio.gather(*tasks)
 
-        # Aggregate results
         final_result = OrderBooks()
-        for r in results:
-            if r is not None:
-                _, orderbook = r
+        for result_item in results:
+            if result_item is not None:
+                _, orderbook = result_item
                 final_result.upsert(orderbook)
 
         return final_result

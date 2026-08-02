@@ -11,6 +11,27 @@ class OkexProvider:
     provider_name = ProviderName.OKEX
 
     @classmethod
+    def _parse_otc_ticker(cls, ticker: dict, base: Base, quote: Quote, multiplier: int) -> Coin | None:
+        """Parse OTC ticker and return Coin if valid, else None."""
+        if ticker.get("asset") != base.value:
+            return None
+
+        buy_price = ticker.get("buyAmt")
+        sell_price = ticker.get("sellAmt")
+
+        if buy_price is None or sell_price is None:
+            return None
+
+        return Coin(
+            provider=cls.provider_name,
+            base=base,
+            buy_price=Decimal(str(buy_price)) * multiplier,
+            sell_price=Decimal(str(sell_price)) * multiplier,
+            quote=quote,
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
+        )
+
+    @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
         """
         Fetch OTC prices from OK-EX.
@@ -33,46 +54,45 @@ class OkexProvider:
             async with semaphore:
                 try:
                     data = await get_json(url)
-
-                    # Response is a list of ticker objects
-                    # Find the ticker for the specific asset
-                    for ticker in data:
-                        if ticker.get("asset") == base.value:
-                            buy_price = ticker.get("buyAmt")
-                            sell_price = ticker.get("sellAmt")
-
-                            if buy_price is None or sell_price is None:
-                                return None
-
-                            coin = Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                buy_price=Decimal(str(buy_price)) * multiplier,
-                                sell_price=Decimal(str(sell_price)) * multiplier,
-                                quote=quote,
-                                timestamp=datetime.datetime.now(datetime.timezone.utc),
-                            )
-                            return (quote, base), coin
-
-                    return None  # Asset not found
-
-                except Exception:
+                except (OSError, ValueError, TimeoutError):
                     return None
 
-        # Build tasks for all requested pairs
-        tasks = []
-        for quote in quotes:
-            for base in bases:
-                tasks.append(fetch_otc(quote, base))
+                # Response is a list of ticker objects
+                for ticker in data:
+                    the_coin = cls._parse_otc_ticker(ticker, base, quote, multiplier)
+                    if the_coin:
+                        return (quote, base), the_coin
 
+                return None  # Asset not found
+
+        # Build tasks for all requested pairs
+        tasks = [fetch_otc(q, b) for q in quotes for b in bases]
         results = await asyncio.gather(*tasks)
 
-        for r in results:
-            if r is not None:
-                _, coin = r
+        for result_item in results:
+            if result_item is not None:
+                _, coin = result_item
                 result.upsert(coin)
 
         return result
+
+    @classmethod
+    def _build_orders(cls, prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> list[Order]:
+        """Build Order objects from price/amount pairs."""
+        return [
+            Order(
+                coin=Coin(
+                    provider=cls.provider_name,
+                    base=base,
+                    quote=quote,
+                    buy_price=Decimal(str(price)) * multiplier,
+                    sell_price=Decimal(str(price)) * multiplier,
+                    timestamp=now,
+                ),
+                quantity=Decimal(str(amount)),
+            )
+            for price, amount in prices_data
+        ]
 
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
@@ -91,63 +111,28 @@ class OkexProvider:
             async with semaphore:
                 try:
                     data = await get_json(url, {"symbol": symbol, "limit": "20"})
-
-                    bids_raw = data.get("bids", [])  # list of [price, amount]
-                    asks_raw = data.get("asks", [])  # list of [price, amount]
-                    now = datetime.datetime.now(datetime.timezone.utc)
-
-                    # Multiplier: 10 for RLS (IRT), 1 for USD (USDT)
-                    multiplier = 10 if quote == Quote.RLS else 1
-
-                    # ---- Build BIDS list ----
-                    bids_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                buy_price=Decimal(str(price)) * multiplier,
-                                sell_price=Decimal(str(price)) * multiplier,
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
-                        )
-                        for price, amount in bids_raw
-                    ]
-
-                    # ---- Build ASKS list ----
-                    asks_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                buy_price=Decimal(str(price)) * multiplier,
-                                sell_price=Decimal(str(price)) * multiplier,
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
-                        )
-                        for price, amount in asks_raw
-                    ]
-
-                    return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
-
-                except Exception as e:
-                    print(e)
+                except (OSError, ValueError, TimeoutError):
                     return None
 
-        # Build tasks for all requested pairs
-        tasks = []
-        for quote in quotes:
-            for base in bases:
-                tasks.append(fetch_orderbook(quote, base))
+                bids_raw = data.get("bids", [])  # list of [price, amount]
+                asks_raw = data.get("asks", [])  # list of [price, amount]
+                now = datetime.datetime.now(datetime.timezone.utc)
 
+                # Multiplier: 10 for RLS (IRT), 1 for USD (USDT)
+                multiplier = 10 if quote == Quote.RLS else 1
+
+                bids_list = cls._build_orders(bids_raw, multiplier, quote, base, now)
+                asks_list = cls._build_orders(asks_raw, multiplier, quote, base, now)
+
+                return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
+
+        # Build tasks for all requested pairs
+        tasks = [fetch_orderbook(q, b) for q in quotes for b in bases]
         results = await asyncio.gather(*tasks)
 
-        for r in results:
-            if r is not None:
-                _, orderbook = r
+        for result_item in results:
+            if result_item is not None:
+                _, orderbook = result_item
                 result.upsert(orderbook)
 
         return result

@@ -98,6 +98,27 @@ class Order(BaseModel):
     def __str__(self) -> str:
         return f"{self.coin}, {self.quantity} available"
 
+
+def _calculate_weighted_average(orders: list[Order], volume: Decimal, side: str) -> Decimal:
+    """Calculate volume-weighted average price for a list of orders."""
+    total_value = Decimal('0')
+    total_volume = Decimal('0')
+    remaining = volume
+
+    for order in orders:
+        if remaining <= 0:
+            break
+        take = min(order.quantity, remaining)
+        price = order.coin.sell_price if side == "buy" else order.coin.buy_price
+        total_value += price * take
+        total_volume += take
+        remaining -= take
+
+    if total_volume == 0:
+        raise ValueError(f"No volume available in {side}s")
+    return total_value / total_volume
+
+
 class OrderBook(BaseModel):
     asks: list[Order]
     bids: list[Order]
@@ -115,41 +136,9 @@ class OrderBook(BaseModel):
         if volume <= 0:
             raise ValueError("Volume must be positive")
 
-        # Average BUY price (consume ASKS)
-        total_buy_value = Decimal('0')
-        total_buy_volume = Decimal('0')
-        remaining_buy = volume
+        avg_buy = _calculate_weighted_average(self.asks, volume, "buy")
+        avg_sell = _calculate_weighted_average(self.bids, volume, "sell")
 
-        for order in self.asks:
-            if remaining_buy <= 0:
-                break
-            take = min(order.quantity, remaining_buy)
-            total_buy_value += order.coin.sell_price * take
-            total_buy_volume += take
-            remaining_buy -= take
-
-        if total_buy_volume == 0:
-            raise ValueError("No volume available in asks")
-        avg_buy = total_buy_value / total_buy_volume
-
-        # Average SELL price (consume BIDS)
-        total_sell_value = Decimal('0')
-        total_sell_volume = Decimal('0')
-        remaining_sell = volume
-
-        for order in self.bids:
-            if remaining_sell <= 0:
-                break
-            take = min(order.quantity, remaining_sell)
-            total_sell_value += order.coin.buy_price * take
-            total_sell_volume += take
-            remaining_sell -= take
-
-        if total_sell_volume == 0:
-            raise ValueError("No volume available in bids")
-        avg_sell = total_sell_value / total_sell_volume
-
-        # Build and return the result
         first_coin = self.asks[0].coin if self.asks else self.bids[0].coin
         return Coin(
             provider=first_coin.provider,

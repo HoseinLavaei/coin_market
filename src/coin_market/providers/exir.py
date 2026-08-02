@@ -12,7 +12,7 @@ class ExirProvider:
     """Exir exchange API provider."""
 
     @classmethod
-    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
+    async def get_otc(cls, _quotes: list[Quote], _bases: list[Base]) -> Coins:
         return Coins()
 
     @classmethod
@@ -21,10 +21,26 @@ class ExirProvider:
         Fetch order books from Exir for the given quote/base pairs.
         Uses the public /v2/orderbook endpoint.
         """
-        # Build a list of (quote, base) pairs to fetch
         pairs = [(quote, base) for quote in quotes for base in bases]
         semaphore = asyncio.Semaphore(2)
         result = OrderBooks()
+
+        def build_orders(prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> list[Order]:
+            """Build Order objects from price/amount pairs."""
+            return [
+                Order(
+                    coin=Coin(
+                        provider=cls.provider_name,
+                        base=base,
+                        quote=quote,
+                        buy_price=Decimal(str(price)) * multiplier,
+                        sell_price=Decimal(str(price)) * multiplier,
+                        timestamp=now,
+                    ),
+                    quantity=Decimal(str(amount)),
+                )
+                for price, amount in prices_data
+            ]
 
         async def fetch_pair(quote: Quote, base: Base):
             # Map quote to Exir's currency string and multiplier
@@ -53,47 +69,12 @@ class ExirProvider:
                     asks_raw = data.get("asks", [])  # list of [price, amount]
                     now = datetime.datetime.now(datetime.timezone.utc)
 
-                    # ---- Build BIDS list ----
-                    # For each bid, both buy_price and sell_price are set to the bid price.
-                    # get_by_volume uses coin.buy_price when consuming bids.
-                    bids_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                buy_price=Decimal(str(price)) * multiplier,
-                                sell_price=Decimal(str(price)) * multiplier,
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
-                        )
-                        for price, amount in bids_raw
-                    ]
+                    bids_list = build_orders(bids_raw, multiplier, quote, base, now)
+                    asks_list = build_orders(asks_raw, multiplier, quote, base, now)
 
-                    # ---- Build ASKS list ----
-                    # For each ask, both prices are set to the ask price.
-                    # get_by_volume uses coin.sell_price when consuming asks.
-                    asks_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                buy_price=Decimal(str(price)) * multiplier,
-                                sell_price=Decimal(str(price)) * multiplier,
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
-                        )
-                        for price, amount in asks_raw
-                    ]
-
-                    # Return a tuple of (key, OrderBook)
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
                 except Exception as e:
-                    # Optionally log the error here
                     print(f"Cant get exir's Orderbook:{e}")
                     return None
 

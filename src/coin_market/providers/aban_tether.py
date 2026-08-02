@@ -38,6 +38,7 @@ class AbanTetherProvider:
             result.upsert(coin)
         return result
 
+
     @classmethod
-    async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
+    async def get_orderbook(cls, _quotes: list[Quote] , _bases: list[Base]) -> OrderBooks:
         return OrderBooks()

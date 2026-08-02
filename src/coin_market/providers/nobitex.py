@@ -12,6 +12,33 @@ class NobitexProvider:
     """Nobitex exchange API provider."""
 
     @classmethod
+    def _parse_market_data(cls, market_key: str, market_data: dict, bases: list[Base], quote: Quote) -> Coin | None:
+        """Parse a single market entry and return a Coin if valid, else None."""
+        base_str = market_key.split("-")[0].upper()
+        try:
+            base = Base(base_str)
+        except ValueError:
+            return None
+
+        if base not in bases:
+            return None
+
+        try:
+            buy_price = Decimal(str(market_data["bestBuy"]))
+            sell_price = Decimal(str(market_data["bestSell"]))
+        except (KeyError, ValueError):
+            return None
+
+        return Coin(
+            provider=cls.provider_name,
+            base=base,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            quote=quote,
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
+        )
+
+    @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
         result: Coins = Coins()
         for quote in quotes:
@@ -23,36 +50,18 @@ class NobitexProvider:
             
             try:
                 json_data = await get_json("https://apiv2.nobitex.ir/market/stats", params)
-                if json_data.get("status") != "ok":
-                    continue
-
-                stats = json_data.get("stats", {})
-
-                for market_key, market_data in stats.items():
-                    base_str = market_key.split("-")[0].upper()
-                    try:
-                        base = Base(base_str)
-                    except ValueError:
-                        continue
-
-                    if base not in bases:
-                        continue
-
-                    # For OTC/Fast Trade proxy, we use Best Buy/Sell from ticker
-                    buy_price = Decimal(str(market_data["bestBuy"]))
-                    sell_price = Decimal(str(market_data["bestSell"]))
-
-                    coin = Coin(
-                        provider=cls.provider_name,
-                        base=base,
-                        buy_price=buy_price,
-                        sell_price=sell_price,
-                        quote=quote,
-                        timestamp=datetime.datetime.now(datetime.timezone.utc),
-                    )
-                    result.upsert(coin)
-            except Exception:
+            except (OSError, ValueError, TimeoutError):
                 continue
+
+            if json_data.get("status") != "ok":
+                continue
+
+            stats = json_data.get("stats", {})
+            for market_key, market_data in stats.items():
+                coin = cls._parse_market_data(market_key, market_data, bases, quote)
+                if coin:
+                    result.upsert(coin)
+
         return result
 
     @classmethod

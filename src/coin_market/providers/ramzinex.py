@@ -11,189 +11,182 @@ class RamzinexProvider:
     """Ramzinex exchange API provider."""
     provider_name = ProviderName.RAMZINEX
 
+    @staticmethod
+    def _clean_number(raw_value):
+        """Remove commas and convert to Decimal safely."""
+        if isinstance(raw_value, (int, float)):
+            return Decimal(raw_value)
+        if isinstance(raw_value, str):
+            cleaned = raw_value.replace(",", "").strip()
+            return Decimal(cleaned)
+        raise ValueError(f"Unsupported type: {type(raw_value)}")
+
     @classmethod
-    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
-        """
-        Fetch OTC (over‑the‑counter) prices from Ramzinex.
-        Uses the public /exchange/api/v1.0/exchange/pairs endpoint.
-        """
+    def _get_quote_mapping(cls, quote: Quote) -> tuple[str, int] | None:
+        """Map Quote enum to Ramzinex currency symbol and multiplier."""
+        if quote == Quote.RLS:
+            return "irr", 10
+        elif quote == Quote.USD:
+            return "usdt", 1
+        return None
+
+    @classmethod
+    async def _fetch_pairs_map(cls) -> dict:
+        """Fetch pairs and build market map."""
         try:
-            json_data = await get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
-            if json_data.get("status") != 0:
-                return Coins()
+            pairs_data = await get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
+        except (OSError, ValueError, TimeoutError):
+            return {}
 
-            result = Coins()
+        if pairs_data.get("status") != 0:
+            return {}
 
-            for quote in quotes:
-                currency_string = "irr" if quote == Quote.RLS else "usdt"
-                multiplier = 10 if quote == Quote.RLS else 1
-
-                for market in json_data["data"]:
-                    if market["quote_currency_symbol"]["en"] != currency_string:
-                        continue
-
-                    buy_price = market.get("buy")
-                    sell_price = market.get("sell")
-
-                    if buy_price in (None, "", "-") or sell_price in (None, "", "-"):
-                        continue
-
-                    base_str = market["base_currency_symbol"]["en"].upper()
-                    try:
-                        base = Base(base_str)
-                    except ValueError:
-                        continue
-
-                    if base not in bases:
-                        continue
-
-                    coin = Coin(
-                        provider=cls.provider_name,
-                        base=base,
-                        buy_price=Decimal(str(buy_price)) * multiplier,
-                        sell_price=Decimal(str(sell_price)) * multiplier,
-                        quote=quote,
-                        timestamp=datetime.datetime.now(datetime.timezone.utc),
-                    )
-                    result.upsert(coin)
-
-            return result
-
-        except Exception:
-            return Coins()
-
-    @classmethod
-    async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
-        """
-        Fetch spot order books from Ramzinex.
-        Uses separate endpoints for bids (buys) and asks (sells).
-        """
-        # 1. Fetch all available pairs
-        json_pairs = await get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
-        if json_pairs.get("status") != 0:
-            return OrderBooks()
-
-        # 2. Pre‑index markets by (quote_symbol, base_symbol) -> pair_id
         market_map = {}
-        for market in json_pairs.get("data", []):
+        for market in pairs_data.get("data", []):
             quote_sym = market["quote_currency_symbol"]["en"].lower()
             base_sym = market["base_currency_symbol"]["en"].upper()
             market_map[(quote_sym, base_sym)] = market["pair_id"]
 
-        semaphore = asyncio.Semaphore(5)
+        return market_map
 
-        def clean_number(raw):
-            """Remove commas and convert to Decimal safely."""
-            if isinstance(raw, (int, float)):
-                return Decimal(raw)
-            if isinstance(raw, str):
-                cleaned = raw.replace(",", "").strip()
-                return Decimal(cleaned)
-            raise ValueError(f"Unsupported type: {type(raw)}")
+    @classmethod
+    def _parse_otc_market(cls, market: dict, quote: Quote, bases: list[Base], multiplier: int) -> Coin | None:
+        """Parse single OTC market entry and return Coin if valid, else None."""
+        buy_price = market.get("buy")
+        sell_price = market.get("sell")
 
-        async def fetch_orderbook(pair_id, base: Base, quote: Quote, multiplier):
-            async with semaphore:
-                try:
-                    buys_url = f"https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/orderbooks/{pair_id}/buys"
-                    sells_url = f"https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/orderbooks/{pair_id}/sells"
+        if buy_price in (None, "", "-") or sell_price in (None, "", "-"):
+            return None
 
-                    buys_data, sells_data = await asyncio.gather(
-                        get_json(buys_url),
-                        get_json(sells_url)
-                    )
+        base_str = market["base_currency_symbol"]["en"].upper()
+        try:
+            base = Base(base_str)
+        except ValueError:
+            return None
 
-                    # Debug: uncomment to see raw responses
-                    # print("Buys response:", buys_data)
-                    # print("Sells response:", sells_data)
+        if base not in bases:
+            return None
 
-                    if buys_data.get("status") != 0 or sells_data.get("status") != 0:
-                        return None
+        return Coin(
+            provider=cls.provider_name,
+            base=base,
+            buy_price=Decimal(str(buy_price)) * multiplier,
+            sell_price=Decimal(str(sell_price)) * multiplier,
+            quote=quote,
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
+        )
 
-                    # Ramzinex returns "data" as a list of [price, amount]
-                    bids_raw = buys_data.get("data", [])
-                    asks_raw = sells_data.get("data", [])
+    @classmethod
+    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
+        """Fetch OTC prices from Ramzinex."""
+        try:
+            pairs_data = await get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
+        except (OSError, ValueError, TimeoutError):
+            return Coins()
 
-                    # Ensure they are lists of lists with two elements
-                    if not isinstance(bids_raw, list) or not isinstance(asks_raw, list):
-                        return None
+        if pairs_data.get("status") != 0:
+            return Coins()
 
-                    now = datetime.datetime.now(datetime.timezone.utc)
-
-                    # ---- Build BIDS list ----
-                    bids_list = []
-                    for entry in bids_raw:
-                        if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                            continue
-                        try:
-                            price = clean_number(entry[0]) * multiplier
-                            amount = clean_number(entry[1])
-                        except (ValueError, TypeError):
-                            continue
-                        coin = Coin(
-                            provider=cls.provider_name,
-                            base=base,
-                            quote=quote,
-                            buy_price=price,
-                            sell_price=price,
-                            timestamp=now,
-                        )
-                        bids_list.append(Order(coin=coin, quantity=amount))
-
-                    # ---- Build ASKS list ----
-                    asks_list = []
-                    for entry in asks_raw:
-                        if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                            continue
-                        try:
-                            price = clean_number(entry[0]) * multiplier
-                            amount = clean_number(entry[1])
-                        except (ValueError, TypeError):
-                            continue
-                        coin = Coin(
-                            provider=cls.provider_name,
-                            base=base,
-                            quote=quote,
-                            buy_price=price,
-                            sell_price=price,
-                            timestamp=now,
-                        )
-                        asks_list.append(Order(coin=coin, quantity=amount))
-
-                    # If both sides are empty, return None (no useful data)
-                    if not bids_list and not asks_list:
-                        return None
-
-                    return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
-
-                except Exception as e:
-                    print(f"Can't get Ramzinex's Orderbook:{e}")
-                    # Log the error for debugging
-                    # logger.error(f"Failed to fetch orderbook for pair_id {pair_id}: {e}")
-                    return None
-
-        # 3. Build tasks
-        tasks = []
+        result = Coins()
         for quote in quotes:
-            if quote == Quote.RLS:
-                quote_symbol = "irr"
-                multiplier = 10
-            elif quote == Quote.USD:
-                quote_symbol = "usdt"
-                multiplier = 1
-            else:
+            mapping = cls._get_quote_mapping(quote)
+            if not mapping:
                 continue
 
+            currency_string, multiplier = mapping
+            for market in pairs_data["data"]:
+                if market["quote_currency_symbol"]["en"] != currency_string:
+                    continue
+
+                coin = cls._parse_otc_market(market, quote, bases, multiplier)
+                if coin:
+                    result.upsert(coin)
+
+        return result
+
+    @classmethod
+    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime) -> list[Order]:
+        """Build Order list from price/amount entries."""
+        orders = []
+        for entry in entries:
+            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                continue
+            try:
+                price = cls._clean_number(entry[0]) * mult
+                amount = cls._clean_number(entry[1])
+            except (ValueError, TypeError):
+                continue
+
+            coin = Coin(
+                provider=cls.provider_name,
+                base=b,
+                quote=q,
+                buy_price=price,
+                sell_price=price,
+                timestamp=now,
+            )
+            orders.append(Order(coin=coin, quantity=amount))
+
+        return orders
+
+    @classmethod
+    async def _fetch_single_orderbook(cls, semaphore: asyncio.Semaphore, pid: int, b: Base, q: Quote, mult: int):
+        """Fetch a single orderbook."""
+        async with semaphore:
+            try:
+                buys_url = f"https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/orderbooks/{pid}/buys"
+                sells_url = f"https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/orderbooks/{pid}/sells"
+
+                buys_data, sells_data = await asyncio.gather(get_json(buys_url), get_json(sells_url))
+            except (OSError, ValueError, TimeoutError):
+                return None
+
+            if buys_data.get("status") != 0 or sells_data.get("status") != 0:
+                return None
+
+            bids_raw = buys_data.get("data", [])
+            asks_raw = sells_data.get("data", [])
+
+            if not isinstance(bids_raw, list) or not isinstance(asks_raw, list):
+                return None
+
+            now = datetime.datetime.now(datetime.timezone.utc)
+
+            bids_list = cls._build_order_list(bids_raw, mult, q, b, now)
+            asks_list = cls._build_order_list(asks_raw, mult, q, b, now)
+
+            if not bids_list and not asks_list:
+                return None
+
+            return (q, b), OrderBook(asks=asks_list, bids=bids_list)
+
+    @classmethod
+    async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
+        """Fetch spot order books from Ramzinex."""
+        market_map = await cls._fetch_pairs_map()
+        if not market_map:
+            return OrderBooks()
+
+        semaphore = asyncio.Semaphore(5)
+        tasks = []
+
+        for quote in quotes:
+            mapping = cls._get_quote_mapping(quote)
+            if not mapping:
+                continue
+
+            quote_symbol, multiplier = mapping
             for base in bases:
-                pair_id = market_map.get((quote_symbol, base.value.upper()))
+                pair_id: int | None = market_map.get((quote_symbol, base.value.upper()))
                 if pair_id is not None:
-                    tasks.append(fetch_orderbook(pair_id, base, quote, multiplier))
+                    tasks.append(cls._fetch_single_orderbook(semaphore, pair_id, base, quote, multiplier))
 
         results = await asyncio.gather(*tasks)
 
         final_result = OrderBooks()
-        for r in results:
-            if r is not None:
-                _, orderbook = r
+        for result_item in results:
+            if result_item is not None:
+                _, orderbook = result_item
                 final_result.upsert(orderbook)
 
         return final_result
