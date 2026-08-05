@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
 from . import Quote, Coins, Base, OrderBooks
 from .provider_name import ProviderName
@@ -18,7 +18,29 @@ from .providers.ompfinex import OmpfinexProvider
 from .providers.ramzinex import RamzinexProvider
 from .providers.tabdeal import TabdealProvider
 from .providers.wallex import WallexProvider
-from .db import init_db, load_latest_snapshot, save_snapshot, close_db
+from .db import (
+    init_db, load_latest_snapshot, save_snapshot, close_db,
+    add_subscription, get_subscriptions_for_chat, get_active_subscriptions,
+    pause_subscriptions_for_chat, resume_subscriptions_for_chat, delete_subscriptions_for_chat
+)
+from .subscription import build_subscription_description
+from .parsers import parse_prices_args
+from .filters import filter_coins_by_provider, filter_orderbooks_by_provider
+from .message_builder import build_prices_output
+
+# ─── Usage message ─────────────────────────────────────────────
+USAGE_MESSAGE = (
+    "Usage:\n"
+    "/prices [--provider NAME | provider=NAME]\n"
+    "        [--type otc|p2p | type=otc|p2p]\n"
+    "        [--volume NUM | volume=NUM]\n"
+    "        [--repeat SEC | repeat=SEC]\n"
+    "        [--stop | stop]              (pause all)\n"
+    "        [--resume]                   (resume all)\n"
+    "        [--delete]                   (delete all)\n"
+    "        [--list]                     (list all)\n\n"
+    "Valid providers: " + ", ".join([p.value for p in ProviderName])
+)
 
 # ─── Global cache ─────────────────────────────────────────────
 _cached_coins: Coins = Coins()
@@ -27,7 +49,6 @@ _cache_updated_at = datetime.now(ZoneInfo(os.getenv("TIMEZONE", "UTC")))
 
 # ─── Environment variables ────────────────────────────────────
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GROUP_ID = os.getenv("GROUP_ID")
 INTERVAL = int(os.getenv("INTERVAL", "60"))
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
 
@@ -35,7 +56,6 @@ TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
 # ─── Data fetching ────────────────────────────────────────────
 
 async def fetch_all() -> tuple[Coins, OrderBooks]:
-    """Fetch fresh OTC and order book data from all providers."""
     providers = [
         AbanTetherProvider(),
         BitpinProvider(),
@@ -75,10 +95,47 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
     return coins_out, books_out
 
 
-# ─── Cache update + broadcast ──────────────────────────────
+# ─── Unified message builder and sender ─────────────────────
 
-async def update_cache(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fetch fresh data, update cache, save to database, and broadcast to group."""
+async def send_market_data(
+    chat_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    provider: ProviderName | None = None,
+    type_filter: str | None = None,
+    volume: float | None = None,
+    is_auto: bool = False,
+) -> None:
+    filter_desc = build_subscription_description(
+        provider.value if provider else None,
+        type_filter,
+        volume,
+        None,
+    )
+
+    timestamp = _cache_updated_at.strftime('%H:%M:%S')
+
+    if provider:
+        coins = filter_coins_by_provider(_cached_coins, provider)
+        books = filter_orderbooks_by_provider(_cached_orderbooks, provider)
+    else:
+        coins = _cached_coins
+        books = _cached_orderbooks
+
+    content = build_prices_output(coins, books, type_filter, volume)
+
+    prefix = "Auto-update" if is_auto else "Market data"
+    msg = f"{prefix} ({filter_desc}, updated at {timestamp})\n\n{content}"
+
+    if len(msg) > 4096:
+        for i in range(0, len(msg), 4096):
+            await context.bot.send_message(chat_id=chat_id, text=msg[i:i + 4096])
+    else:
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+
+
+# ─── Cache update + subscription broadcaster ──────────────
+
+async def update_cache_and_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
     global _cached_coins, _cached_orderbooks, _cache_updated_at
 
     try:
@@ -87,159 +144,219 @@ async def update_cache(context: ContextTypes.DEFAULT_TYPE) -> None:
         _cached_orderbooks = books
         _cache_updated_at = datetime.now(TIMEZONE)
 
-        # Save to database
         await save_snapshot(coins, books)
 
         timestamp = _cache_updated_at.strftime('%H:%M:%S')
-        print(f"[{timestamp}] Cache updated successfully and saved to DB.")
+        print(f"[{timestamp}] Cache updated and saved to DB.")
 
-        if GROUP_ID:
-            msg = (
-                f"Market update ({timestamp})\n\n"
-                f"{coins}\n\n"
-                f"{books}"
-            )
-            await context.bot.send_message(chat_id=GROUP_ID, text=msg)
+        subscriptions = await get_active_subscriptions()
+        print(f"[{timestamp}] Sending updates to {len(subscriptions)} subscriptions")
+
+        for sub in subscriptions:
+            try:
+                provider = ProviderName[sub.provider.upper()] if sub.provider else None
+                await send_market_data(
+                    chat_id=sub.chat_id,
+                    context=context,
+                    provider=provider,
+                    type_filter=sub.type_filter,
+                    volume=sub.volume,
+                    is_auto=True,
+                )
+            except Exception as e:
+                print(f"Failed to send to {sub.chat_id}: {e}")
 
     except Exception as e:
         print(f"Cache update failed: {e}")
 
 
-# ─── Command handlers ────────────────────────────────────────
+# ─── Helper to extract chat_id and args ─────────────────────
 
-def parse_price_filters(args: list[str]) -> tuple[ProviderName | None, str | None, float | None]:
-    """Parse command arguments to extract provider, type, and volume filters.
-    
-    Raises ValueError if arguments are invalid.
-    """
-    provider_filter: ProviderName | None = None
-    type_filter: str | None = None
-    volume_filter: float | None = None
+def _get_chat_and_args(update: Update) -> tuple[int, list[str]] | None:
+    """Return (chat_id, args) from a message or channel post, or None if invalid."""
+    msg = update.effective_message
+    if msg is None:
+        return None
 
-    valid_providers = {p.name.lower(): p for p in ProviderName}
-    valid_types = {"otc", "p2p"}
+    text = msg.text
+    if not text or not text.startswith('/prices'):
+        return None
 
-    for arg in args:
-        arg_lower = arg.lower()
-        if arg_lower in valid_providers:
-            provider_filter = valid_providers[arg_lower]
-        elif arg_lower in valid_types:
-            type_filter = arg_lower.upper()
-        else:
-            try:
-                volume_filter = float(arg)
-            except ValueError:
-                raise ValueError(arg)
+    args = text.split()[1:]
+    chat = update.effective_chat
+    if chat is None:
+        return None
 
-    return provider_filter, type_filter, volume_filter
+    return chat.id, args
 
 
-def build_filter_description(provider_filter: ProviderName | None, type_filter: str | None) -> str:
-    """Build a human-readable description of applied filters."""
-    parts = []
-    if provider_filter:
-        parts.append(f"provider {provider_filter.value}")
-    if type_filter:
-        parts.append(f"type {type_filter}")
-    return " + ".join(parts) if parts else "all data"
+# ─── Command handler helpers ────────────────────────────────
 
-
-def build_prices_output(
-    coins: Coins,
-    books: OrderBooks,
-    type_filter: str | None,
-    volume: float | None = None,
-) -> str:
-    """Build the prices message based on type filter and optional volume for OrderBooks."""
-    from decimal import Decimal
-    
-    lines = []
-    
-    if type_filter == "OTC" or type_filter is None:
-        lines.append(f"OTC prices:\n{coins}")
-    
-    if type_filter == "P2P":
-        lines.append("")
-    
-    if type_filter == "P2P" or type_filter is None:
-        if volume is not None:
-            orderbooks_str = books.to_string(Decimal(str(volume)))
-        else:
-            orderbooks_str = str(books)
-        lines.append(f"Order books (P2P):\n{orderbooks_str}")
-    
-    return "\n".join(lines)
-
-
-async def send_message_chunked(update: Update, text: str) -> None:
-    """Send message, splitting into chunks if needed."""
-    if update.message is None:
+async def _handle_stop(update: Update, chat_id: int) -> None:
+    target = update.effective_message
+    if target is None:
         return
-    if len(text) > 4096:
-        for i in range(0, len(text), 4096):
-            await update.message.reply_text(text[i:i + 4096])
+    count = await pause_subscriptions_for_chat(chat_id)
+    if count > 0:
+        await target.reply_text(f"Paused {count} subscription(s) for this chat. Use /prices resume to restart.")
     else:
-        await update.message.reply_text(text)
+        await target.reply_text("No active subscriptions to pause.")
 
+
+async def _handle_resume(update: Update, chat_id: int) -> None:
+    target = update.effective_message
+    if target is None:
+        return
+    count = await resume_subscriptions_for_chat(chat_id)
+    if count > 0:
+        await target.reply_text(f"Resumed {count} paused subscription(s) for this chat.")
+    else:
+        await target.reply_text("No paused subscriptions to resume.")
+
+
+async def _handle_delete(update: Update, chat_id: int) -> None:
+    target = update.effective_message
+    if target is None:
+        return
+    count = await delete_subscriptions_for_chat(chat_id)
+    if count > 0:
+        await target.reply_text(f"Deleted {count} subscription(s) for this chat.")
+    else:
+        await target.reply_text("No subscriptions to delete.")
+
+
+async def _handle_list(update: Update, chat_id: int) -> None:
+    target = update.effective_message
+    if target is None:
+        return
+    subs = await get_subscriptions_for_chat(chat_id)
+
+    if not subs:
+        await target.reply_text("No subscriptions for this chat.")
+        return
+
+    lines = ["Your subscriptions:"]
+    for sub in subs:
+        desc = build_subscription_description(
+            sub.provider,
+            sub.type_filter,
+            sub.volume,
+            sub.repeat_interval,
+        )
+        lines.append(f"  #{sub.id}: {desc} (status: {sub.status})")
+
+    msg = "\n".join(lines)
+    if len(msg) > 4096:
+        for i in range(0, len(msg), 4096):
+            await target.reply_text(msg[i:i + 4096])
+    else:
+        await target.reply_text(msg)
+
+
+async def _handle_watch(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    provider: ProviderName | None,
+    type_filter: str | None,
+    volume: float | None,
+    interval: int,
+) -> None:
+    target = update.effective_message
+    if target is None:
+        return
+
+    sub = await add_subscription(
+        chat_id=chat_id,
+        provider=provider.value if provider else None,
+        type_filter=type_filter,
+        volume=volume,
+        repeat_interval=interval,
+    )
+
+    # Send first update immediately
+    await send_market_data(
+        chat_id=chat_id,
+        context=context,
+        provider=provider,
+        type_filter=type_filter,
+        volume=volume,
+        is_auto=True,
+    )
+
+    filter_desc = build_subscription_description(
+        provider.value if provider else None,
+        type_filter,
+        volume,
+        None,
+    )
+    await target.reply_text(
+        f"Subscription #{sub.id} created. Auto-updates every {interval}s with filters: {filter_desc}. "
+        "First update sent immediately.\n"
+        "Commands: /prices stop (pause all), /prices resume, /prices delete, /prices list"
+    )
+
+
+async def _handle_one_time(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    provider: ProviderName | None,
+    type_filter: str | None,
+    volume: float | None,
+) -> None:
+    target = update.effective_message
+    if target is None:
+        return
+    await send_market_data(
+        chat_id=chat_id,
+        context=context,
+        provider=provider,
+        type_filter=type_filter,
+        volume=volume,
+        is_auto=False,
+    )
+
+
+# ─── Main command handler ────────────────────────────────────
 
 async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Reply with prices, optionally filtered by provider and/or type, with optional volume.
-    
-    Usage:
-        /prices                              - all prices
-        /prices aban_tether                  - specific provider
-        /prices otc                          - specific type
-        /prices aban_tether otc              - provider and type
-        /prices otc aban_tether              - order doesn't matter
-        /prices 100                          - all prices with VWAP for volume 100
-        /prices aban_tether 50               - provider with VWAP for volume 50
-        /prices p2p 25.5                     - P2P only with VWAP for volume 25.5
-    
-    Note: Volume argument is only used for OrderBooks (P2P).
-    """
-    if update.message is None or context.args is None:
+    """Handle /prices commands (works in private, groups, channels)."""
+    extracted = _get_chat_and_args(update)
+    if extracted is None:
         return
+
+    chat_id, args = extracted
+    target = update.effective_message  # should be non‑None here
+
+    # Special commands that don't need filter parsing
+    special_handlers = {
+        "stop": _handle_stop,
+        "pause": _handle_stop,
+        "resume": _handle_resume,
+        "delete": _handle_delete,
+        "list": _handle_list,
+    }
+
+    if args and args[0].lower() in special_handlers:
+        await special_handlers[args[0].lower()](update, chat_id)
+        return
+
+    # Parse filters and volume
     try:
-        provider_filter, type_filter, volume = parse_price_filters(context.args)
+        provider, type_filter, volume, repeat_interval, stop_flag = parse_prices_args(args)
     except ValueError as e:
-        await update.message.reply_text(
-            f"Invalid argument: {e}\n"
-            "Valid providers: " + ", ".join([p.value for p in ProviderName]) + "\n"
-            "Valid types: OTC, P2P\n"
-            "Volume: any positive number (for OrderBooks only)"
-        )
+        if target is not None:
+            await target.reply_text(f"Error: {e}\n\n{USAGE_MESSAGE}")
         return
 
-    filter_desc = build_filter_description(provider_filter, type_filter)
-    if volume is not None:
-        filter_desc += f" + volume {volume}"
-    timestamp = _cache_updated_at.strftime('%H:%M:%S')
-    
-    coins_to_show = filter_coins_by_provider(_cached_coins, provider_filter) if provider_filter else _cached_coins
-    books_to_show = filter_orderbooks_by_provider(_cached_orderbooks, provider_filter) if provider_filter else _cached_orderbooks
-    
-    prices_output = build_prices_output(coins_to_show, books_to_show, type_filter, volume)
-    msg = f"Market data ({filter_desc}, updated at {timestamp})\n\n{prices_output}"
-    
-    await send_message_chunked(update, msg)
-
-
-def filter_coins_by_provider(coins: Coins, provider: ProviderName) -> Coins:
-    """Filter coins by provider name."""
-    filtered = Coins()
-    for coin in coins.coins.values():
-        if coin.provider == provider:
-            filtered.upsert(coin)
-    return filtered
-
-
-def filter_orderbooks_by_provider(books: OrderBooks, provider: ProviderName) -> OrderBooks:
-    """Filter order books by provider name."""
-    filtered = OrderBooks()
-    for book in books.books.values():
-        if book.get_provider() == provider:
-            filtered.upsert(book)
-    return filtered
+    # Dispatch based on flags
+    if stop_flag:
+        await _handle_stop(update, chat_id)
+    elif repeat_interval is not None:
+        await _handle_watch(update, context, chat_id, provider, type_filter, volume, repeat_interval)
+    else:
+        await _handle_one_time(update, context, chat_id, provider, type_filter, volume)
 
 
 # ─── Bot startup ─────────────────────────────────────────────
@@ -249,25 +366,9 @@ async def run_bot():
         print("Error: TELEGRAM_TOKEN environment variable not set.")
         sys.exit(1)
 
-    # Initialize database with retries
     print("Initializing database...")
-    max_retries = 10
-    initial_delay = 10  # Wait 10 seconds before first attempt
-    
-    await asyncio.sleep(initial_delay)
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            await init_db()
-            break
-        except Exception as e:
-            if attempt == max_retries:
-                print(f"Error: Failed to initialize database after {max_retries} attempts: {e}")
-                sys.exit(1)
-            print(f"Attempt {attempt}/{max_retries}: Database not ready, retrying in 5s...")
-            await asyncio.sleep(5)
+    await init_db()
 
-    # Load latest snapshot from database
     print("Loading latest market data from database...")
     global _cached_coins, _cached_orderbooks, _cache_updated_at
     try:
@@ -283,19 +384,18 @@ async def run_bot():
         print(f"Warning: Could not load snapshot: {e}")
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    app.add_handler(CommandHandler("prices", prices_command))
+    app.add_handler(MessageHandler(filters.ALL, prices_command))
 
     job_queue = app.job_queue
     if job_queue is None:
         print("Error: JobQueue not available. Install python-telegram-bot[job-queue].")
         sys.exit(1)
 
-    job_queue.run_once(update_cache, when=0)
-    job_queue.run_repeating(update_cache, interval=INTERVAL)
+    job_queue.run_once(update_cache_and_broadcast, when=0)
+    job_queue.run_repeating(update_cache_and_broadcast, interval=INTERVAL)
 
-    print(f"Bot started. Cache updates every {INTERVAL}s. Commands: /prices")
-    print(f"Broadcasting to group: {GROUP_ID}")
+    print(f"Bot started. Cache updates every {INTERVAL}s.")
+    print("Commands: /prices [--provider] [--type] [--volume] [--repeat] [--stop] [--resume] [--delete] [--list]")
 
     await app.initialize()
     await app.start()
@@ -313,5 +413,5 @@ async def run_bot():
         if app.updater:
             await app.updater.stop()
         await app.stop()
-        await app.shutdown()
         await close_db()
+        await app.shutdown()

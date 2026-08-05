@@ -1,6 +1,9 @@
+# coin.py (updated with specific exception)
+
 from datetime import datetime, tzinfo
 from decimal import Decimal
 from enum import Enum
+import json
 
 from pydantic import BaseModel, Field
 
@@ -11,10 +14,12 @@ class Base(Enum):
     USDT = "USDT"
     BTC = "BTC"
 
+
 class Quote(Enum):
     RLS = "RLS"
     USD = "USD"
     EUR = "EUR"
+
     def get_symbol(self) -> str:
         match self:
             case self.RLS:
@@ -23,6 +28,7 @@ class Quote(Enum):
                 return "$"
             case self.EUR:
                 return "€"
+
     @classmethod
     def from_symbol(cls, data: str) -> Quote:
         match data:
@@ -35,11 +41,8 @@ class Quote(Enum):
             case _:
                 raise ValueError(f"Invalid currency symbol: {data}")
 
+
 class Coin(BaseModel):
-    """Represents a cryptocurrency with market data.
-    
-    Frozen model to ensure immutability after creation.
-    """
     provider: ProviderName
     base: Base
     buy_price: Decimal
@@ -54,53 +57,58 @@ class Coin(BaseModel):
         formatted_sell = f"{self.sell_price:,}"
         return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.provider.value}'s {self.base.value} : Buy: {formatted_buy} {self.quote.get_symbol()} , Sell: {formatted_sell} {self.quote.get_symbol()}"
 
-    def to_timezone(self, tz:tzinfo) -> "Coin":
-        """Returns a new Coin instance with the timestamp converted to the given timezone."""
+    def to_timezone(self, tz: tzinfo) -> Coin:
         return self.model_copy(update={"timestamp": self.timestamp.astimezone(tz)})
 
-class Coins(BaseModel):
-    """Collection of coins from a specific provider and currency.
+    # ---------- Serialization ----------
+    def to_dict(self) -> dict:
+        return {
+            "provider": self.provider.name,
+            "base": self.base.name,
+            "buy_price": str(self.buy_price),
+            "sell_price": str(self.sell_price),
+            "quote": self.quote.name,
+            "timestamp": self.timestamp.isoformat(),
+        }
 
-    Acts as a dictionary with symbol keys for easy access.
-    """
-    coins: dict[tuple[ProviderName,Quote,Base],Coin] = Field(default_factory=dict)  # the key is f"{provider_name}:{quote}:{base}"
+    @classmethod
+    def from_dict(cls, data: dict) -> Coin:
+        return cls(
+            provider=ProviderName[data["provider"]],
+            base=Base[data["base"]],
+            buy_price=Decimal(data["buy_price"]),
+            sell_price=Decimal(data["sell_price"]),
+            quote=Quote[data["quote"]],
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+        )
 
-    def upsert(self, coin: Coin) -> None:
-        key = self.get_key_from_details(coin.provider, coin.quote, coin.base)
-        self.coins[key] = coin
-
-    @staticmethod
-    def get_key_from_details(provider: ProviderName, quote: Quote, base: Base) -> tuple[ProviderName,Quote,Base]:
-        return provider, quote, base
-
-    def to_timezone(self, tz:tzinfo) -> Coins:
-        """Returns a new Coin instance with the timestamp converted to the given timezone."""
-        result:Coins=Coins()
-        for coin in self.coins.values():
-            result.upsert(coin.to_timezone(tz))
-        return result
-
-
-    def __str__(self) -> str:
-        if not self.coins:
-            return (
-                f"(No coins)"
-            )
-
-        return "\n\n".join(str(coin) for coin in self.coins.values())
 
 class Order(BaseModel):
     coin: Coin
     quantity: Decimal
 
-    def to_timezone(self, tz:tzinfo) -> Order:
-        return Order(coin=self.coin.to_timezone(tz),quantity=self.quantity)
+    def to_timezone(self, tz: tzinfo) -> Order:
+        return Order(coin=self.coin.to_timezone(tz), quantity=self.quantity)
+
     def __str__(self) -> str:
         return f"{self.coin}, {self.quantity} available"
 
+    # ---------- Serialization ----------
+    def to_dict(self) -> dict:
+        return {
+            "coin": self.coin.to_dict(),
+            "quantity": str(self.quantity),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Order:
+        return cls(
+            coin=Coin.from_dict(data["coin"]),
+            quantity=Decimal(data["quantity"]),
+        )
+
 
 def _calculate_weighted_average(orders: list[Order], volume: Decimal, side: str) -> Decimal:
-    """Calculate volume-weighted average price for a list of orders."""
     total_value = Decimal('0')
     total_volume = Decimal('0')
     remaining = volume
@@ -124,13 +132,6 @@ class OrderBook(BaseModel):
     bids: list[Order]
 
     def get_by_volume(self, volume: Decimal) -> Coin:
-        """
-        Returns a Coin whose:
-          - buy_price  = volume‑weighted average of the ASKS (what you pay when buying)
-          - sell_price = volume‑weighted average of the BIDS (what you receive when selling)
-        Consumes up to `volume` units from each side independently.
-        If a side has insufficient liquidity, all available units are used.
-        """
         if not self.asks or not self.bids:
             raise ValueError("Order book is empty on one or both sides")
         if volume <= 0:
@@ -174,45 +175,92 @@ class OrderBook(BaseModel):
             raise ValueError("Order book is empty")
 
     def to_timezone(self, tz: tzinfo) -> OrderBook:
-        """Returns a new OrderBook instance with all timestamps converted to the given timezone."""
-        new_asks:list[Order] = [order.to_timezone(tz) for order in self.asks]
-        new_bids:list[Order] = [order.to_timezone(tz) for order in self.bids]
+        new_asks = [order.to_timezone(tz) for order in self.asks]
+        new_bids = [order.to_timezone(tz) for order in self.bids]
         return OrderBook(asks=new_asks, bids=new_bids)
 
-    def to_string(self, volume:Decimal) -> str:
+    def to_string(self, volume: Decimal) -> str:
         if not self.asks and not self.bids:
             return "OrderBook(empty)"
 
         total_ask_vol = sum(order.quantity for order in self.asks)
         total_bid_vol = sum(order.quantity for order in self.bids)
 
-        # Base summary
         summary = (
             f"OrderBook (asks: {len(self.asks)} levels, total vol: {total_ask_vol:.4f} | "
             f"bids: {len(self.bids)} levels, total vol: {total_bid_vol:.4f})"
         )
 
-        # Try to show VWAP for 1 unit of the base asset (e.g., 1 BTC, 1 USDT, etc.)
+        # Catch only ValueError (raised by get_by_volume when no volume available)
         try:
             vwap_coin = self.get_by_volume(volume)
             return f"{summary}\n  VWAP for 1.0 base: {vwap_coin}"
-        except Exception as e:
-            print(f"The book has no volume:{e}")
-            # Fallback: show best bid/ask if VWAP fails (e.g., book has no volume)
+        except ValueError:
             best_ask = self.asks[0].coin.sell_price if self.asks else None
             best_bid = self.bids[0].coin.buy_price if self.bids else None
             return f"{summary}\n  Best Ask: {best_ask}, Best Bid: {best_bid}"
+
     def __str__(self) -> str:
         return self.to_string(Decimal(1))
+
+    # ---------- Serialization ----------
+    def to_dict(self) -> dict:
+        return {
+            "asks": [order.to_dict() for order in self.asks],
+            "bids": [order.to_dict() for order in self.bids],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> OrderBook:
+        return cls(
+            asks=[Order.from_dict(order_data) for order_data in data["asks"]],
+            bids=[Order.from_dict(order_data) for order_data in data["bids"]],
+        )
+
+
+class Coins(BaseModel):
+    coins: dict[tuple[ProviderName, Quote, Base], Coin] = Field(default_factory=dict)
+
+    def upsert(self, coin: Coin) -> None:
+        key = self.get_key_from_details(coin.provider, coin.quote, coin.base)
+        self.coins[key] = coin
+
+    @staticmethod
+    def get_key_from_details(provider: ProviderName, quote: Quote, base: Base) -> tuple[ProviderName, Quote, Base]:
+        return provider, quote, base
+
+    def to_timezone(self, tz: tzinfo) -> Coins:
+        result = Coins()
+        for coin in self.coins.values():
+            result.upsert(coin.to_timezone(tz))
+        return result
+
+    def __str__(self) -> str:
+        if not self.coins:
+            return "(No coins)"
+        return "\n\n".join(str(coin) for coin in self.coins.values())
+
+    # ---------- Serialization ----------
+    def to_json(self) -> str:
+        return json.dumps([coin.to_dict() for coin in self.coins.values()])
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "Coins":
+        coin_dicts = json.loads(json_str)
+        coins = Coins()
+        for coin_dict in coin_dicts:
+            coins.upsert(Coin.from_dict(coin_dict))
+        return coins
+
 
 class OrderBooks(BaseModel):
     books: dict[tuple[ProviderName, Quote, Base], OrderBook] = Field(default_factory=dict)
 
     def upsert(self, book: OrderBook) -> None:
         key = self.get_key_from_details(
-            book.get_provider(),  # Now works with new OrderBook
-            book.get_quote(),     # Now works with new OrderBook
-            book.get_base()       # Now works with new OrderBook
+            book.get_provider(),
+            book.get_quote(),
+            book.get_base()
         )
         self.books[key] = book
 
@@ -221,22 +269,31 @@ class OrderBooks(BaseModel):
         return provider, quote, base
 
     def to_timezone(self, tz: tzinfo) -> OrderBooks:
-        """Returns a new OrderBooks instance with all timestamps converted to the given timezone."""
         result = OrderBooks()
         for book in self.books.values():
-            result.upsert(book.to_timezone(tz))  # Now works with new OrderBook
+            result.upsert(book.to_timezone(tz))
         return result
+
     def to_string(self, volume: Decimal) -> str:
-        """Convert OrderBooks to string with VWAP calculated for given volume."""
         if not self.books:
             return "OrderBooks(empty)"
-
         lines = []
         for (provider, quote, base), book in self.books.items():
-            # Indent the multi-line book string
             book_str = book.to_string(volume).replace("\n", "\n  ")
             lines.append(f"{provider.value}/{quote.value}/{base.value}:\n  {book_str}")
         return "OrderBooks:\n" + "\n\n".join(lines)
+
     def __str__(self) -> str:
         return self.to_string(Decimal(1))
 
+    # ---------- Serialization ----------
+    def to_json(self) -> str:
+        return json.dumps([book.to_dict() for book in self.books.values()])
+
+    @classmethod
+    def from_json(cls, json_str: str) -> OrderBooks:
+        book_dicts = json.loads(json_str)
+        books = OrderBooks()
+        for book_dict in book_dicts:
+            books.upsert(OrderBook.from_dict(book_dict))
+        return books

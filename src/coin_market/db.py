@@ -1,39 +1,33 @@
-import json
 import os
 import urllib.parse
 from datetime import datetime
-from decimal import Decimal
 
 import asyncpg
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import select, update, delete, and_
 
-from . import Coins, Coin, OrderBooks, OrderBook, Base as CoinBase, Quote
-from .coin import Order
-from .provider_name import ProviderName
+from . import Coins, OrderBooks
+from .subscription import Subscription
+from .base import Base
 
 # Environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable not set")
 
-# Create async engine
 engine = create_async_engine(DATABASE_URL, echo=False)
 
-# Use async_sessionmaker for async sessions
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False
 )
 
-Base = declarative_base()
-
 
 class MarketSnapshot(Base):
-    """Store complete market snapshots with coins and orderbooks."""
     __tablename__ = "market_snapshots"
 
     timestamp: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), primary_key=True, index=True)
@@ -42,7 +36,6 @@ class MarketSnapshot(Base):
 
 
 async def init_db():
-    """Initialize the database and create tables."""
     try:
         db_url = os.getenv("DATABASE_URL")
         if not db_url:
@@ -55,23 +48,15 @@ async def init_db():
         password = parsed.password
         database = parsed.path.lstrip("/")
 
-        conn = await asyncpg.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-        )
+        conn = await asyncpg.connect(host=host, port=port, user=user, password=password, database=database)
 
         try:
-            # Enable TimescaleDB extension
             try:
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
-                print("TimescaleDB extension created/verified")
+                print("TimescaleDB extension is ready.")
             except Exception as e:
                 print(f"Warning: Could not create TimescaleDB extension: {e}")
 
-            # Create market_snapshots table
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS market_snapshots (
                     timestamp TIMESTAMPTZ PRIMARY KEY,
@@ -79,18 +64,38 @@ async def init_db():
                     orderbooks JSONB NOT NULL
                 )
             """)
-            print("Created market_snapshots table")
+            print("market_snapshots table is ready")
 
-            # Convert to hypertable if not already
             try:
                 await conn.execute("""
                     SELECT create_hypertable('market_snapshots', 'timestamp', if_not_exists => TRUE)
                 """)
-                print("Created TimescaleDB hypertable for market_snapshots")
+                print("TimescaleDB hypertable for market_snapshots is ready")
             except asyncpg.UniqueViolationError:
                 print("market_snapshots is already a hypertable")
             except Exception as e:
                 print(f"Note: {e}")
+
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    provider TEXT,
+                    type_filter TEXT,
+                    volume NUMERIC,
+                    repeat_interval INT,
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            print("subscriptions table is ready")
+
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)
+            """)
+            print("subscriptions index is ready")
+
         finally:
             await conn.close()
 
@@ -99,96 +104,9 @@ async def init_db():
         raise
 
 
-def _coin_to_dict(coin: Coin) -> dict:
-    """Convert Coin to JSON-serializable dict."""
-    return {
-        "provider": coin.provider.name,
-        "base": coin.base.name,
-        "buy_price": str(coin.buy_price),
-        "sell_price": str(coin.sell_price),
-        "quote": coin.quote.name,
-        "timestamp": coin.timestamp.isoformat(),
-    }
-
-
-def _dict_to_coin(data: dict) -> Coin:
-    """Convert dict back to Coin."""
-    return Coin(
-        provider=ProviderName[data["provider"]],
-        base=CoinBase[data["base"]],
-        buy_price=Decimal(data["buy_price"]),
-        sell_price=Decimal(data["sell_price"]),
-        quote=Quote[data["quote"]],
-        timestamp=datetime.fromisoformat(data["timestamp"]),
-    )
-
-
-def _order_to_dict(order: Order) -> dict:
-    """Convert Order to JSON-serializable dict."""
-    return {
-        "coin": _coin_to_dict(order.coin),
-        "quantity": str(order.quantity),
-    }
-
-
-def _dict_to_order(data: dict) -> Order:
-    """Convert dict back to Order."""
-    return Order(
-        coin=_dict_to_coin(data["coin"]),
-        quantity=Decimal(data["quantity"]),
-    )
-
-
-def _orderbook_to_dict(book: OrderBook) -> dict:
-    """Convert OrderBook to JSON-serializable dict."""
-    return {
-        "asks": [_order_to_dict(order) for order in book.asks],
-        "bids": [_order_to_dict(order) for order in book.bids],
-    }
-
-
-def _dict_to_orderbook(data: dict) -> OrderBook:
-    """Convert dict back to OrderBook."""
-    return OrderBook(
-        asks=[_dict_to_order(order_data) for order_data in data["asks"]],
-        bids=[_dict_to_order(order_data) for order_data in data["bids"]],
-    )
-
-
-def _coins_to_json(coins: Coins) -> str:
-    """Convert Coins collection to JSON array (from dict values)."""
-    coin_dicts = [_coin_to_dict(coin) for coin in coins.coins.values()]
-    return json.dumps(coin_dicts)
-
-
-def _json_to_coins(json_str: str) -> Coins:
-    """Convert JSON array back to Coins collection."""
-    coin_dicts = json.loads(json_str)
-    coins = Coins()
-    for coin_dict in coin_dicts:
-        coin = _dict_to_coin(coin_dict)
-        coins.upsert(coin)
-    return coins
-
-
-def _orderbooks_to_json(books: OrderBooks) -> str:
-    """Convert OrderBooks collection to JSON array (from dict values)."""
-    book_dicts = [_orderbook_to_dict(book) for book in books.books.values()]
-    return json.dumps(book_dicts)
-
-
-def _json_to_orderbooks(json_str: str) -> OrderBooks:
-    """Convert JSON array back to OrderBooks collection."""
-    book_dicts = json.loads(json_str)
-    books = OrderBooks()
-    for book_dict in book_dicts:
-        book = _dict_to_orderbook(book_dict)
-        books.upsert(book)
-    return books
-
+# ─── Snapshot helpers ──────────────────────────────────────
 
 async def load_latest_snapshot() -> tuple[Coins, OrderBooks] | None:
-    """Load the most recent market snapshot from the database."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             sa.select(MarketSnapshot)
@@ -196,35 +114,114 @@ async def load_latest_snapshot() -> tuple[Coins, OrderBooks] | None:
             .limit(1)
         )
         snapshot = result.scalar_one_or_none()
-
         if snapshot is None:
             return None
 
-        # Use getattr with fallback to satisfy type checker
         coins_data = getattr(snapshot, 'coins', '{}')
         orderbooks_data = getattr(snapshot, 'orderbooks', '{}')
-
-        # Ensure we have valid JSON strings
         if not coins_data or not orderbooks_data:
             return None
 
-        coins = _json_to_coins(coins_data)
-        orderbooks = _json_to_orderbooks(orderbooks_data)
+        coins = Coins.from_json(coins_data)
+        orderbooks = OrderBooks.from_json(orderbooks_data)
         return coins, orderbooks
 
 
 async def save_snapshot(coins: Coins, orderbooks: OrderBooks) -> None:
-    """Save a market snapshot to the database."""
     async with AsyncSessionLocal() as session:
         snapshot = MarketSnapshot(
             timestamp=datetime.now(),
-            coins=_coins_to_json(coins),
-            orderbooks=_orderbooks_to_json(orderbooks),
+            coins=coins.to_json(),
+            orderbooks=orderbooks.to_json(),
         )
         session.add(snapshot)
         await session.commit()
 
 
+# ─── Subscription helpers ──────────────────────────────────
+
+async def add_subscription(
+    chat_id: int,
+    provider: str | None = None,
+    type_filter: str | None = None,
+    volume: float | None = None,
+    repeat_interval: int | None = None,
+) -> Subscription:
+    async with AsyncSessionLocal() as session:
+        sub = Subscription(
+            chat_id=chat_id,
+            provider=provider,
+            type_filter=type_filter,
+            volume=volume,
+            repeat_interval=repeat_interval,
+            status="active",
+        )
+        session.add(sub)
+        await session.commit()
+        await session.refresh(sub)
+        return sub
+
+
+async def get_subscriptions_for_chat(chat_id: int) -> list[Subscription]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Subscription).where(Subscription.chat_id == chat_id)
+        )
+        return list(result.scalars().all())
+
+
+async def get_active_subscriptions() -> list[Subscription]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Subscription).where(
+                and_(
+                    Subscription.status == "active",
+                    Subscription.repeat_interval.is_not(None)
+                )
+            )
+        )
+        return list(result.scalars().all())
+
+
+async def pause_subscriptions_for_chat(chat_id: int) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(Subscription)
+            .where(Subscription.chat_id == chat_id)
+            .values(status="paused", updated_at=datetime.now())
+        )
+        await session.commit()
+        # noinspection PyUnresolvedReferences
+        return result.rowcount
+
+
+async def resume_subscriptions_for_chat(chat_id: int) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(Subscription)
+            .where(
+                and_(
+                    Subscription.chat_id == chat_id,
+                    Subscription.status == "paused"
+                )
+            )
+            .values(status="active", updated_at=datetime.now())
+        )
+        await session.commit()
+        # noinspection PyUnresolvedReferences
+        return result.rowcount
+
+
+async def delete_subscriptions_for_chat(chat_id: int) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            delete(Subscription)
+            .where(Subscription.chat_id == chat_id)
+        )
+        await session.commit()
+        # noinspection PyUnresolvedReferences
+        return result.rowcount
+
+
 async def close_db():
-    """Close database connection."""
     await engine.dispose()
