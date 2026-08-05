@@ -1,6 +1,6 @@
 # Coin Market
 
-A Python package for getting cryptocurrency market information from Iranian exchanges.
+A Python application for getting cryptocurrency market information from Iranian exchanges and send them with message in Telegram using a bot.
 
 The goal of this project is to provide a simple and unified way to access coin prices and market data from different
 Iranian cryptocurrency providers.
@@ -11,6 +11,10 @@ Iranian cryptocurrency providers.
 - Common interface for different providers
 - Easy integration into Python projects
 - Extensible provider system for adding new markets
+
+## Limitations
+
+- Currently, we only support USDT. But reading other coins data is possible with little changes.
 
 ## Supported Markets
 
