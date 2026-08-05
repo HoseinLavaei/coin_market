@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, Job
 
 from . import Quote, Coins, Base, OrderBooks
 from .provider_name import ProviderName
@@ -46,6 +46,9 @@ USAGE_MESSAGE = (
 _cached_coins: Coins = Coins()
 _cached_orderbooks: OrderBooks = OrderBooks()
 _cache_updated_at = datetime.now(ZoneInfo(os.getenv("TIMEZONE", "UTC")))
+
+# ─── Subscription jobs ──────────────────────────────────────
+_subscription_jobs: dict[int, Job] = {}
 
 # ─── Environment variables ────────────────────────────────────
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -133,9 +136,10 @@ async def send_market_data(
         await context.bot.send_message(chat_id=chat_id, text=msg)
 
 
-# ─── Cache update + subscription broadcaster ──────────────
+# ─── Cache update (no broadcasting) ─────────────────────────
 
-async def update_cache_and_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def update_cache(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fetch fresh data, update cache, and save snapshot to DB."""
     global _cached_coins, _cached_orderbooks, _cache_updated_at
 
     try:
@@ -149,77 +153,135 @@ async def update_cache_and_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None
         timestamp = _cache_updated_at.strftime('%H:%M:%S')
         print(f"[{timestamp}] Cache updated and saved to DB.")
 
-        subscriptions = await get_active_subscriptions()
-        print(f"[{timestamp}] Sending updates to {len(subscriptions)} subscriptions")
-
-        for sub in subscriptions:
-            try:
-                provider = ProviderName[sub.provider.upper()] if sub.provider else None
-                await send_market_data(
-                    chat_id=sub.chat_id,
-                    context=context,
-                    provider=provider,
-                    type_filter=sub.type_filter,
-                    volume=sub.volume,
-                    is_auto=True,
-                )
-            except Exception as e:
-                print(f"Failed to send to {sub.chat_id}: {e}")
-
     except Exception as e:
         print(f"Cache update failed: {e}")
 
 
-# ─── Helper to extract chat_id and args ─────────────────────
+# ─── Subscription job callback ──────────────────────────────
 
-def _get_chat_and_args(update: Update) -> tuple[int, list[str]] | None:
-    """Return (chat_id, args) from a message or channel post, or None if invalid."""
-    msg = update.effective_message
-    if msg is None:
-        return None
+async def send_subscription_update(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Called by a subscription job to send an update."""
+    job = context.job
+    if job is None:
+        return
+    data = job.data
+    if not isinstance(data, dict):
+        return
+    chat_id:int|None = data.get("chat_id")
+    if chat_id is None:
+        return
+    provider_name:str|None = data.get("provider")
+    provider = ProviderName[provider_name.upper()] if provider_name else None
+    type_filter = data.get("type_filter")
+    volume = data.get("volume")
 
-    text = msg.text
-    if not text or not text.startswith('/prices'):
-        return None
+    await send_market_data(
+        chat_id=chat_id,
+        context=context,
+        provider=provider,
+        type_filter=type_filter,
+        volume=volume,
+        is_auto=True,
+    )
 
-    args = text.split()[1:]
-    chat = update.effective_chat
-    if chat is None:
-        return None
 
-    return chat.id, args
+# ─── Manage subscription jobs ─────────────────────────────
+
+def schedule_subscription_job(job_queue, sub) -> Job:
+    """Schedule a repeating job for a subscription. Returns the Job."""
+    data = {
+        "chat_id": sub.chat_id,
+        "provider": sub.provider,
+        "type_filter": sub.type_filter,
+        "volume": sub.volume,
+    }
+    job_queue.run_once(send_subscription_update, when=0, data=data)
+
+    job = job_queue.run_repeating(
+        send_subscription_update,
+        interval=sub.repeat_interval,
+        first=0,
+        data=data,
+    )
+    return job
+
+
+def remove_jobs_for_chat(chat_id: int) -> None:
+    """Remove all subscription jobs for a given chat_id."""
+    global _subscription_jobs
+    to_remove = []
+    for sid, job in _subscription_jobs.items():
+        data = job.data
+        if isinstance(data, dict) and data.get("chat_id") == chat_id:
+            to_remove.append(sid)
+    for sid in to_remove:
+        job = _subscription_jobs.pop(sid, None)
+        if job:
+            job.schedule_removal()
+
+
+async def load_and_schedule_all_subscriptions(job_queue) -> None:
+    """Load all active subscriptions from DB and schedule jobs."""
+    global _subscription_jobs
+    subs = await get_active_subscriptions()
+    for sub in subs:
+        if sub.repeat_interval is None:
+            continue
+        job = schedule_subscription_job(job_queue, sub)
+        _subscription_jobs[sub.id] = job
+        print(f"Scheduled subscription #{sub.id} every {sub.repeat_interval}s")
 
 
 # ─── Command handler helpers ────────────────────────────────
 
-async def _handle_stop(update: Update, chat_id: int) -> None:
+async def _handle_stop(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    global _subscription_jobs
     target = update.effective_message
     if target is None:
         return
+
     count = await pause_subscriptions_for_chat(chat_id)
+
     if count > 0:
+        remove_jobs_for_chat(chat_id)
         await target.reply_text(f"Paused {count} subscription(s) for this chat. Use /prices resume to restart.")
     else:
         await target.reply_text("No active subscriptions to pause.")
 
 
-async def _handle_resume(update: Update, chat_id: int) -> None:
+async def _handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    global _subscription_jobs
     target = update.effective_message
     if target is None:
         return
+
     count = await resume_subscriptions_for_chat(chat_id)
+
     if count > 0:
+        subs = await get_subscriptions_for_chat(chat_id)
+        job_queue = context.job_queue
+        if job_queue is None:
+            await target.reply_text("Job queue not available.")
+            return
+        for sub in subs:
+            if sub.status == "active" and sub.repeat_interval is not None:
+                job = schedule_subscription_job(job_queue, sub)
+                _subscription_jobs[sub.id] = job
         await target.reply_text(f"Resumed {count} paused subscription(s) for this chat.")
     else:
         await target.reply_text("No paused subscriptions to resume.")
 
 
-async def _handle_delete(update: Update, chat_id: int) -> None:
+async def _handle_delete(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    global _subscription_jobs
     target = update.effective_message
     if target is None:
         return
+
     count = await delete_subscriptions_for_chat(chat_id)
+
     if count > 0:
+        remove_jobs_for_chat(chat_id)
         await target.reply_text(f"Deleted {count} subscription(s) for this chat.")
     else:
         await target.reply_text("No subscriptions to delete.")
@@ -274,15 +336,12 @@ async def _handle_watch(
         repeat_interval=interval,
     )
 
-    # Send first update immediately
-    await send_market_data(
-        chat_id=chat_id,
-        context=context,
-        provider=provider,
-        type_filter=type_filter,
-        volume=volume,
-        is_auto=True,
-    )
+    job_queue = context.job_queue
+    if job_queue is None:
+        await target.reply_text("Job queue not available.")
+        return
+    job = schedule_subscription_job(job_queue, sub)
+    _subscription_jobs[sub.id] = job
 
     filter_desc = build_subscription_description(
         provider.value if provider else None,
@@ -327,9 +386,8 @@ async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     chat_id, args = extracted
-    target = update.effective_message  # should be non‑None here
+    target = update.effective_message
 
-    # Special commands that don't need filter parsing
     special_handlers = {
         "stop": _handle_stop,
         "pause": _handle_stop,
@@ -339,10 +397,9 @@ async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     }
 
     if args and args[0].lower() in special_handlers:
-        await special_handlers[args[0].lower()](update, chat_id)
+        await special_handlers[args[0].lower()](update, context, chat_id)
         return
 
-    # Parse filters and volume
     try:
         provider, type_filter, volume, repeat_interval, stop_flag = parse_prices_args(args)
     except ValueError as e:
@@ -350,13 +407,28 @@ async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await target.reply_text(f"Error: {e}\n\n{USAGE_MESSAGE}")
         return
 
-    # Dispatch based on flags
     if stop_flag:
-        await _handle_stop(update, chat_id)
+        await _handle_stop(update, context, chat_id)
     elif repeat_interval is not None:
         await _handle_watch(update, context, chat_id, provider, type_filter, volume, repeat_interval)
     else:
         await _handle_one_time(update, context, chat_id, provider, type_filter, volume)
+
+
+# ─── Helper to extract chat_id and args ─────────────────────
+
+def _get_chat_and_args(update: Update) -> tuple[int, list[str]] | None:
+    msg = update.effective_message
+    if msg is None:
+        return None
+    text = msg.text
+    if not text or not text.startswith('/prices'):
+        return None
+    args = text.split()[1:]
+    chat = update.effective_chat
+    if chat is None:
+        return None
+    return chat.id, args
 
 
 # ─── Bot startup ─────────────────────────────────────────────
@@ -391,8 +463,10 @@ async def run_bot():
         print("Error: JobQueue not available. Install python-telegram-bot[job-queue].")
         sys.exit(1)
 
-    job_queue.run_once(update_cache_and_broadcast, when=0)
-    job_queue.run_repeating(update_cache_and_broadcast, interval=INTERVAL)
+    job_queue.run_once(update_cache, when=0)
+    job_queue.run_repeating(update_cache, interval=INTERVAL)
+
+    await load_and_schedule_all_subscriptions(job_queue)
 
     print(f"Bot started. Cache updates every {INTERVAL}s.")
     print("Commands: /prices [--provider] [--type] [--volume] [--repeat] [--stop] [--resume] [--delete] [--list]")
