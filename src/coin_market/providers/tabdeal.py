@@ -24,7 +24,8 @@ class TabdealProvider:
         return None
 
     @classmethod
-    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime, reverse: bool = False) -> list[Order]:
+    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime,
+                          reverse: bool = False) -> list[Order]:
         """Build Order list from price/amount entries."""
         orders = []
         for entry in entries:

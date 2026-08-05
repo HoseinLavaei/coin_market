@@ -7,8 +7,8 @@ from .providers import AbanTetherProvider, \
     Provider, \
     RamzinexProvider, \
     WallexProvider, \
-    TabdealProvider,\
-    OmpfinexProvider,\
+    TabdealProvider, \
+    OmpfinexProvider, \
     OkexProvider
 
 __all__ = [

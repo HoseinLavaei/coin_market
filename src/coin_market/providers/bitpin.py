@@ -31,7 +31,8 @@ class BitpinProvider:
 
             for base in bases:
                 for market in markets:
-                    if market["currency2"]["code"].upper() == quote_string and market["currency1"]["code"].upper() == str(base.value):
+                    if market["currency2"]["code"].upper() == quote_string and market["currency1"][
+                        "code"].upper() == str(base.value):
                         price = Decimal(str(market["price"]))
                         buy_percent = Decimal(str(market.get("otc_buy_percent", "0")))
                         sell_percent = Decimal(str(market.get("otc_sell_percent", "0")))
@@ -103,6 +104,7 @@ class BitpinProvider:
                 final_result.upsert(orderbook)
 
         return final_result
+
 
 async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provider_name):
     async with semaphore:

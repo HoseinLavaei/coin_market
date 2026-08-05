@@ -8,6 +8,14 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, Job
 
 from . import Quote, Coins, Base, OrderBooks
+from .db import (
+    init_db, load_latest_snapshot, save_snapshot, close_db,
+    add_subscription, get_subscriptions_for_chat, get_active_subscriptions,
+    pause_subscriptions_for_chat, resume_subscriptions_for_chat, delete_subscriptions_for_chat
+)
+from .filters import filter_coins_by_provider, filter_orderbooks_by_provider
+from .message_builder import build_prices_output
+from .parsers import parse_prices_args
 from .provider_name import ProviderName
 from .providers.aban_tether import AbanTetherProvider
 from .providers.bitpin import BitpinProvider
@@ -18,28 +26,20 @@ from .providers.ompfinex import OmpfinexProvider
 from .providers.ramzinex import RamzinexProvider
 from .providers.tabdeal import TabdealProvider
 from .providers.wallex import WallexProvider
-from .db import (
-    init_db, load_latest_snapshot, save_snapshot, close_db,
-    add_subscription, get_subscriptions_for_chat, get_active_subscriptions,
-    pause_subscriptions_for_chat, resume_subscriptions_for_chat, delete_subscriptions_for_chat
-)
 from .subscription import build_subscription_description
-from .parsers import parse_prices_args
-from .filters import filter_coins_by_provider, filter_orderbooks_by_provider
-from .message_builder import build_prices_output
 
 # ─── Usage message ─────────────────────────────────────────────
 USAGE_MESSAGE = (
-    "Usage:\n"
-    "/prices [--provider NAME | provider=NAME]\n"
-    "        [--type otc|p2p | type=otc|p2p]\n"
-    "        [--volume NUM | volume=NUM]\n"
-    "        [--repeat SEC | repeat=SEC]\n"
-    "        [--stop | stop]              (pause all)\n"
-    "        [--resume]                   (resume all)\n"
-    "        [--delete]                   (delete all)\n"
-    "        [--list]                     (list all)\n\n"
-    "Valid providers: " + ", ".join([p.value for p in ProviderName])
+        "Usage:\n"
+        "/prices [--provider NAME | provider=NAME]\n"
+        "        [--type otc|p2p | type=otc|p2p]\n"
+        "        [--volume NUM | volume=NUM]\n"
+        "        [--repeat SEC | repeat=SEC]\n"
+        "        [--stop | stop]              (pause all)\n"
+        "        [--resume]                   (resume all)\n"
+        "        [--delete]                   (delete all)\n"
+        "        [--list]                     (list all)\n\n"
+        "Valid providers: " + ", ".join([p.value for p in ProviderName])
 )
 
 # ─── Global cache ─────────────────────────────────────────────
@@ -64,11 +64,11 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
         BitpinProvider(),
         ExirProvider(),
         NobitexProvider(),
-        RamzinexProvider(),
-        WallexProvider(),
-        TabdealProvider(),
-        OmpfinexProvider(),
         OkexProvider(),
+        OmpfinexProvider(),
+        RamzinexProvider(),
+        TabdealProvider(),
+        WallexProvider(),
     ]
 
     quotes = [Quote.RLS]
@@ -101,12 +101,12 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
 # ─── Unified message builder and sender ─────────────────────
 
 async def send_market_data(
-    chat_id: int,
-    context: ContextTypes.DEFAULT_TYPE,
-    provider: ProviderName | None = None,
-    type_filter: str | None = None,
-    volume: float | None = None,
-    is_auto: bool = False,
+        chat_id: int,
+        context: ContextTypes.DEFAULT_TYPE,
+        provider: ProviderName | None = None,
+        type_filter: str | None = None,
+        volume: float | None = None,
+        is_auto: bool = False,
 ) -> None:
     filter_desc = build_subscription_description(
         provider.value if provider else None,
@@ -138,7 +138,7 @@ async def send_market_data(
 
 # ─── Cache update (no broadcasting) ─────────────────────────
 
-async def update_cache(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def update_cache(_context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch fresh data, update cache, and save snapshot to DB."""
     global _cached_coins, _cached_orderbooks, _cache_updated_at
 
@@ -167,10 +167,10 @@ async def send_subscription_update(context: ContextTypes.DEFAULT_TYPE) -> None:
     data = job.data
     if not isinstance(data, dict):
         return
-    chat_id:int|None = data.get("chat_id")
+    chat_id: int | None = data.get("chat_id")
     if chat_id is None:
         return
-    provider_name:str|None = data.get("provider")
+    provider_name: str | None = data.get("provider")
     provider = ProviderName[provider_name.upper()] if provider_name else None
     type_filter = data.get("type_filter")
     volume = data.get("volume")
@@ -234,7 +234,7 @@ async def load_and_schedule_all_subscriptions(job_queue) -> None:
 
 # ─── Command handler helpers ────────────────────────────────
 
-async def _handle_stop(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+async def _handle_stop(update: Update, _context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
     global _subscription_jobs
     target = update.effective_message
     if target is None:
@@ -272,7 +272,7 @@ async def _handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE, cha
         await target.reply_text("No paused subscriptions to resume.")
 
 
-async def _handle_delete(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+async def _handle_delete(update: Update, _context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
     global _subscription_jobs
     target = update.effective_message
     if target is None:
@@ -316,13 +316,13 @@ async def _handle_list(update: Update, chat_id: int) -> None:
 
 
 async def _handle_watch(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    provider: ProviderName | None,
-    type_filter: str | None,
-    volume: float | None,
-    interval: int,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        provider: ProviderName | None,
+        type_filter: str | None,
+        volume: float | None,
+        interval: int,
 ) -> None:
     target = update.effective_message
     if target is None:
@@ -357,12 +357,12 @@ async def _handle_watch(
 
 
 async def _handle_one_time(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    provider: ProviderName | None,
-    type_filter: str | None,
-    volume: float | None,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        provider: ProviderName | None,
+        type_filter: str | None,
+        volume: float | None,
 ) -> None:
     target = update.effective_message
     if target is None:
@@ -449,7 +449,8 @@ async def run_bot():
             _cached_coins, _cached_orderbooks = snapshot
             _cache_updated_at = datetime.now(TIMEZONE)
             timestamp = _cache_updated_at.strftime('%H:%M:%S')
-            print(f"[{timestamp}] Loaded {len(_cached_coins.coins)} coins and {len(_cached_orderbooks.books)} orderbooks from DB.")
+            print(
+                f"[{timestamp}] Loaded {len(_cached_coins.coins)} coins and {len(_cached_orderbooks.books)} orderbooks from DB.")
         else:
             print("No previous data in database. Will fetch on first update.")
     except Exception as e:

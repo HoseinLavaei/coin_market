@@ -21,7 +21,8 @@ class WallexProvider:
         return None
 
     @classmethod
-    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime, key: str = "price") -> list[Order]:
+    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime,
+                          key: str = "price") -> list[Order]:
         """Build Order list from price/quantity entries."""
         return [
             Order(
@@ -128,7 +129,8 @@ class WallexProvider:
         return stats.get("lastPrice") != "-"
 
     @classmethod
-    def _build_orderbook_tasks(cls, sem: asyncio.Semaphore, symbols: dict, quotes: list[Quote], bases: list[Base]) -> list:
+    def _build_orderbook_tasks(cls, sem: asyncio.Semaphore, symbols: dict, quotes: list[Quote],
+                               bases: list[Base]) -> list:
         """Build list of orderbook fetch tasks."""
         tasks = []
         for quote in quotes:

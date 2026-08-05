@@ -20,14 +20,8 @@ Currently supported providers:
 - Bitpin
 - Exir
 - Nobitex
+- Okex
+- Ompfinex
 - Ramzinex
+- Tabdeal
 - Wallex
-
-More providers can be added in the future.
-
-## Installation
-
-Download the source code, go to the root directory and run:
-
-```bash
-pip install -e .

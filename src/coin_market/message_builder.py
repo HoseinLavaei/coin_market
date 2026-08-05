@@ -1,12 +1,13 @@
 from decimal import Decimal
+
 from . import Coins, OrderBooks
 
 
 def build_prices_output(
-    coins: Coins,
-    books: OrderBooks,
-    type_filter: str | None,
-    volume: float | None = None,
+        coins: Coins,
+        books: OrderBooks,
+        type_filter: str | None,
+        volume: float | None = None,
 ) -> str:
     lines = []
 

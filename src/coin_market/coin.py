@@ -1,9 +1,9 @@
 # coin.py (updated with specific exception)
 
+import json
 from datetime import datetime, tzinfo
 from decimal import Decimal
 from enum import Enum
-import json
 
 from pydantic import BaseModel, Field
 

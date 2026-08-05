@@ -1,5 +1,7 @@
 import asyncio
+
 from dotenv import load_dotenv
+
 from coin_market.bot import run_bot
 
 # Load environment variables from .env file

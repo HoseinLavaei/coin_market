@@ -4,14 +4,14 @@ from datetime import datetime
 
 import asyncpg
 import sqlalchemy as sa
+from sqlalchemy import select, update, delete, and_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import select, update, delete, and_
 
 from . import Coins, OrderBooks
-from .subscription import Subscription
 from .base import Base
+from .subscription import Subscription
 
 # Environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -58,12 +58,22 @@ async def init_db():
                 print(f"Warning: Could not create TimescaleDB extension: {e}")
 
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS market_snapshots (
-                    timestamp TIMESTAMPTZ PRIMARY KEY,
-                    coins JSONB NOT NULL,
-                    orderbooks JSONB NOT NULL
-                )
-            """)
+                               CREATE TABLE IF NOT EXISTS market_snapshots
+                               (
+                                   timestamp
+                                   TIMESTAMPTZ
+                                   PRIMARY
+                                   KEY,
+                                   coins
+                                   JSONB
+                                   NOT
+                                   NULL,
+                                   orderbooks
+                                   JSONB
+                                   NOT
+                                   NULL
+                               )
+                               """)
             print("market_snapshots table is ready")
 
             try:
@@ -77,23 +87,44 @@ async def init_db():
                 print(f"Note: {e}")
 
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS subscriptions (
-                    id SERIAL PRIMARY KEY,
-                    chat_id BIGINT NOT NULL,
-                    provider TEXT,
-                    type_filter TEXT,
-                    volume NUMERIC,
-                    repeat_interval INT,
-                    status TEXT DEFAULT 'active',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                               CREATE TABLE IF NOT EXISTS subscriptions
+                               (
+                                   id
+                                   SERIAL
+                                   PRIMARY
+                                   KEY,
+                                   chat_id
+                                   BIGINT
+                                   NOT
+                                   NULL,
+                                   provider
+                                   TEXT,
+                                   type_filter
+                                   TEXT,
+                                   volume
+                                   NUMERIC,
+                                   repeat_interval
+                                   INT,
+                                   status
+                                   TEXT
+                                   DEFAULT
+                                   'active',
+                                   created_at
+                                   TIMESTAMPTZ
+                                   DEFAULT
+                                   NOW
+                               (
+                               ),
+                                   updated_at TIMESTAMPTZ DEFAULT NOW
+                               (
+                               )
+                                   )
+                               """)
             print("subscriptions table is ready")
 
             await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)
-            """)
+                               CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)
+                               """)
             print("subscriptions index is ready")
 
         finally:
@@ -141,11 +172,11 @@ async def save_snapshot(coins: Coins, orderbooks: OrderBooks) -> None:
 # ─── Subscription helpers ──────────────────────────────────
 
 async def add_subscription(
-    chat_id: int,
-    provider: str | None = None,
-    type_filter: str | None = None,
-    volume: float | None = None,
-    repeat_interval: int | None = None,
+        chat_id: int,
+        provider: str | None = None,
+        type_filter: str | None = None,
+        volume: float | None = None,
+        repeat_interval: int | None = None,
 ) -> Subscription:
     async with AsyncSessionLocal() as session:
         sub = Subscription(

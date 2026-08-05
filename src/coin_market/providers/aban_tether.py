@@ -18,7 +18,7 @@ class AbanTetherProvider:
         json = await get_json("https://api.abantether.com/api/v1/manager/otc/ticker")
         markets = json["data"]["markets"]
         pairs = [(quote, base) for quote in quotes for base in bases]
-        result:Coins = Coins()
+        result: Coins = Coins()
         for quote, base in pairs:
             match quote:
                 case Quote.RLS:
@@ -38,7 +38,6 @@ class AbanTetherProvider:
             result.upsert(coin)
         return result
 
-
     @classmethod
-    async def get_orderbook(cls, _quotes: list[Quote] , _bases: list[Base]) -> OrderBooks:
+    async def get_orderbook(cls, _quotes: list[Quote], _bases: list[Base]) -> OrderBooks:
         return OrderBooks()

@@ -47,7 +47,7 @@ class NobitexProvider:
                 "srcCurrency": ",".join(str(b.value).lower() for b in bases),
                 "dstCurrency": currency_string,
             }
-            
+
             try:
                 json_data = await get_json("https://apiv2.nobitex.ir/market/stats", params)
             except (OSError, ValueError, TimeoutError):
