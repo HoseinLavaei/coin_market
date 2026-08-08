@@ -1,6 +1,7 @@
-import os
 import urllib.parse
 from datetime import datetime
+from decimal import Decimal
+from typing import cast
 
 import asyncpg
 import sqlalchemy as sa
@@ -12,11 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from . import Coins, OrderBooks
 from .base import Base
 from .subscription import Subscription
-
-# Environment variables
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable not set")
+from .environment import DATABASE_URL
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
@@ -35,13 +32,20 @@ class MarketSnapshot(Base):
     orderbooks: Mapped[str] = mapped_column(JSONB, nullable=False)
 
 
+# ─── Fee table ──────────────────────────────────────────────
+
+class ProviderFee(Base):
+    __tablename__ = "provider_fees"
+
+    provider: Mapped[str] = mapped_column(sa.String, primary_key=True)
+    buy_fee: Mapped[Decimal] = mapped_column(sa.DECIMAL, nullable=False)
+    sell_fee: Mapped[Decimal] = mapped_column(sa.DECIMAL, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=datetime.now, onupdate=datetime.now)
+
+
 async def init_db():
     try:
-        db_url = os.getenv("DATABASE_URL")
-        if not db_url:
-            raise ValueError("DATABASE_URL environment variable not set")
-
-        parsed = urllib.parse.urlparse(db_url)
+        parsed = urllib.parse.urlparse(DATABASE_URL)
         host = parsed.hostname
         port = parsed.port or 5432
         user = parsed.username
@@ -57,23 +61,14 @@ async def init_db():
             except Exception as e:
                 print(f"Warning: Could not create TimescaleDB extension: {e}")
 
+            # market_snapshots
             await conn.execute("""
-                               CREATE TABLE IF NOT EXISTS market_snapshots
-                               (
-                                   timestamp
-                                   TIMESTAMPTZ
-                                   PRIMARY
-                                   KEY,
-                                   coins
-                                   JSONB
-                                   NOT
-                                   NULL,
-                                   orderbooks
-                                   JSONB
-                                   NOT
-                                   NULL
-                               )
-                               """)
+                CREATE TABLE IF NOT EXISTS market_snapshots (
+                    timestamp TIMESTAMPTZ PRIMARY KEY,
+                    coins JSONB NOT NULL,
+                    orderbooks JSONB NOT NULL
+                )
+            """)
             print("market_snapshots table is ready")
 
             try:
@@ -86,46 +81,39 @@ async def init_db():
             except Exception as e:
                 print(f"Note: {e}")
 
+            # subscriptions
             await conn.execute("""
-                               CREATE TABLE IF NOT EXISTS subscriptions
-                               (
-                                   id
-                                   SERIAL
-                                   PRIMARY
-                                   KEY,
-                                   chat_id
-                                   BIGINT
-                                   NOT
-                                   NULL,
-                                   provider
-                                   TEXT,
-                                   type_filter
-                                   TEXT,
-                                   volume
-                                   NUMERIC,
-                                   repeat_interval
-                                   INT,
-                                   status
-                                   TEXT
-                                   DEFAULT
-                                   'active',
-                                   created_at
-                                   TIMESTAMPTZ
-                                   DEFAULT
-                                   NOW
-                               (
-                               ),
-                                   updated_at TIMESTAMPTZ DEFAULT NOW
-                               (
-                               )
-                                   )
-                               """)
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    provider VARCHAR,
+                    type_filter VARCHAR,
+                    volume DECIMAL,
+                    repeat_interval INT,
+                    status VARCHAR DEFAULT 'active',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    CONSTRAINT check_repeat_interval_positive CHECK (repeat_interval IS NULL OR repeat_interval > 0),
+                    CONSTRAINT check_status_valid CHECK (status IN ('active', 'paused'))
+                )
+            """)
             print("subscriptions table is ready")
 
             await conn.execute("""
-                               CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)
-                               """)
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)
+            """)
             print("subscriptions index is ready")
+
+            # provider_fees
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS provider_fees (
+                    provider VARCHAR PRIMARY KEY,
+                    buy_fee DECIMAL NOT NULL,
+                    sell_fee DECIMAL NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            print("provider_fees table is ready")
 
         finally:
             await conn.close()
@@ -175,7 +163,7 @@ async def add_subscription(
         chat_id: int,
         provider: str | None = None,
         type_filter: str | None = None,
-        volume: float | None = None,
+        volume: Decimal | None = None,
         repeat_interval: int | None = None,
 ) -> Subscription:
     async with AsyncSessionLocal() as session:
@@ -253,6 +241,24 @@ async def delete_subscriptions_for_chat(chat_id: int) -> int:
         # noinspection PyUnresolvedReferences
         return result.rowcount
 
+
+# ─── Fee helpers ────────────────────────────────────────────
+
+async def get_fee(provider: str) -> tuple[Decimal, Decimal]:
+    """
+    Retrieve buy and sell fee rates for a provider.
+    Returns (buy_fee, sell_fee) as Decimals.
+    Raises ValueError if provider not found.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ProviderFee).where(ProviderFee.provider == provider)
+        )
+        fee_row = result.scalar_one_or_none()
+        if fee_row is None:
+            raise ValueError(f"Fee not found for provider: {provider}")
+        fee = cast(ProviderFee, fee_row)
+        return fee.buy_fee, fee.sell_fee
 
 async def close_db():
     await engine.dispose()

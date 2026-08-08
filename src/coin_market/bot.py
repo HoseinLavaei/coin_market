@@ -1,8 +1,7 @@
 import asyncio
-import os
 import sys
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from decimal import Decimal
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, Job
@@ -27,6 +26,7 @@ from .providers.ramzinex import RamzinexProvider
 from .providers.tabdeal import TabdealProvider
 from .providers.wallex import WallexProvider
 from .subscription import build_subscription_description
+from .environment import TIMEZONE, TELEGRAM_TOKEN, INTERVAL
 
 # ─── Usage message ─────────────────────────────────────────────
 USAGE_MESSAGE = (
@@ -45,16 +45,10 @@ USAGE_MESSAGE = (
 # ─── Global cache ─────────────────────────────────────────────
 _cached_coins: Coins = Coins()
 _cached_orderbooks: OrderBooks = OrderBooks()
-_cache_updated_at = datetime.now(ZoneInfo(os.getenv("TIMEZONE", "UTC")))
+_cache_updated_at = datetime.now(TIMEZONE)
 
 # ─── Subscription jobs ──────────────────────────────────────
 _subscription_jobs: dict[int, Job] = {}
-
-# ─── Environment variables ────────────────────────────────────
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-INTERVAL = int(os.getenv("INTERVAL", "60"))
-TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
-
 
 # ─── Data fetching ────────────────────────────────────────────
 
@@ -82,7 +76,7 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:
         if isinstance(r, Coins):
-            r = r.to_timezone(TIMEZONE)
+            r = r.to_timezone()
             for coin in r.coins.values():
                 coins_out.upsert(coin)
 
@@ -91,7 +85,7 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:
         if isinstance(r, OrderBooks):
-            r = r.to_timezone(TIMEZONE)
+            r = r.to_timezone()
             for book in r.books.values():
                 books_out.upsert(book)
 
@@ -105,7 +99,7 @@ async def send_market_data(
         context: ContextTypes.DEFAULT_TYPE,
         provider: ProviderName | None = None,
         type_filter: str | None = None,
-        volume: float | None = None,
+        volume: Decimal | None = None,
         is_auto: bool = False,
 ) -> None:
     filter_desc = build_subscription_description(
@@ -321,7 +315,7 @@ async def _handle_watch(
         chat_id: int,
         provider: ProviderName | None,
         type_filter: str | None,
-        volume: float | None,
+        volume: Decimal | None,
         interval: int,
 ) -> None:
     target = update.effective_message
@@ -362,7 +356,7 @@ async def _handle_one_time(
         chat_id: int,
         provider: ProviderName | None,
         type_filter: str | None,
-        volume: float | None,
+        volume: Decimal | None,
 ) -> None:
     target = update.effective_message
     if target is None:

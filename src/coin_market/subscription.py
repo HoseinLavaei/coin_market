@@ -1,7 +1,9 @@
 from datetime import datetime
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import CheckConstraint
 
 from .base import Base
 
@@ -9,10 +11,9 @@ from .base import Base
 def build_subscription_description(
         provider: str | None,
         type_filter: str | None,
-        volume: float | None,
+        volume: Decimal | None,
         repeat_interval: int | None,
 ) -> str:
-    """Build a human-readable description of subscription filters."""
     parts = []
     if provider:
         parts.append(f"provider={provider}")
@@ -31,13 +32,19 @@ class Subscription(Base):
     id: Mapped[int] = mapped_column(sa.Integer, primary_key=True, autoincrement=True)
     chat_id: Mapped[int] = mapped_column(sa.BigInteger, nullable=False, index=True)
     provider: Mapped[str | None] = mapped_column(sa.String, nullable=True)
-    type_filter: Mapped[str | None] = mapped_column(sa.String, nullable=True)  # 'OTC' or 'P2P'
-    volume: Mapped[float | None] = mapped_column(sa.Numeric, nullable=True)
+    type_filter: Mapped[str | None] = mapped_column(sa.String, nullable=True)
+    volume: Mapped[Decimal | None] = mapped_column(sa.DECIMAL, nullable=True)  # DECIMAL
     repeat_interval: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
-    status: Mapped[str] = mapped_column(sa.String, default="active")  # 'active' or 'paused'
+    status: Mapped[str] = mapped_column(sa.String, default="active")
+
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), default=datetime.now, onupdate=datetime.now
+    )
+
+    __table_args__ = (
+        CheckConstraint("repeat_interval IS NULL OR repeat_interval > 0", name="check_repeat_interval_positive"),
+        CheckConstraint("status IN ('active', 'paused')", name="check_status_valid"),
     )
 
     def __repr__(self) -> str:

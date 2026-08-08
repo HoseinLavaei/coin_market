@@ -6,8 +6,6 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=${DATABASE_URL}
-      - TIMEZONE=${TIMEZONE:-UTC}
     depends_on:
       db:
         condition: service_healthy

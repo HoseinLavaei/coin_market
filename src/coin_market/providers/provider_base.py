@@ -1,5 +1,4 @@
 from typing import Protocol, runtime_checkable
-
 import httpx
 
 from .. import ProviderName
@@ -19,9 +18,7 @@ async def get_json(url: str, params: dict[str, str] | None = None) -> dict:
 @runtime_checkable
 class Provider(Protocol):
     provider_name: ProviderName
-
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins: ...
-
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks: ...

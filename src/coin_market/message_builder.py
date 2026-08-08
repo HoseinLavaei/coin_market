@@ -7,7 +7,7 @@ def build_prices_output(
         coins: Coins,
         books: OrderBooks,
         type_filter: str | None,
-        volume: float | None = None,
+        volume: Decimal | None = None,
 ) -> str:
     lines = []
 

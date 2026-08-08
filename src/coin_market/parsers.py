@@ -1,5 +1,5 @@
 from typing import cast
-
+from decimal import Decimal
 from .provider_name import ProviderName
 
 
@@ -85,10 +85,10 @@ def _parse_type_filter(value: str) -> str:
     return lower.upper()
 
 
-def _parse_volume(value: str) -> float:
-    """Convert string to float."""
+def _parse_volume(value: str) -> Decimal:
+    """Convert string to Decimal."""
     try:
-        return float(value)
+        return Decimal(value)
     except ValueError:
         raise ValueError(f"Invalid volume: {value}")
 
@@ -104,7 +104,7 @@ def _parse_repeat_interval(value: str) -> int:
         raise ValueError(f"Invalid repeat interval: {value}")
 
 
-def parse_prices_args(args: list[str]) -> tuple[ProviderName | None, str | None, float | None, int | None, bool]:
+def parse_prices_args(args: list[str]) -> tuple[ProviderName | None, str | None, Decimal | None, int | None, bool]:
     """Parse /prices arguments strictly as named options."""
     pairs, errors = _extract_arg_pairs(args)
     if errors:
