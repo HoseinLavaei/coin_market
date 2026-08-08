@@ -25,8 +25,10 @@ class OkexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
-            buy_price=Decimal(str(buy_price)) * multiplier,
-            sell_price=Decimal(str(sell_price)) * multiplier,
+            _buy_price=Decimal(str(buy_price)) * multiplier,
+            _sell_price=Decimal(str(sell_price)) * multiplier,
+            buy_fee=Decimal(0),
+            sell_fee=Decimal(0),
             quote=quote,
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
@@ -77,7 +79,8 @@ class OkexProvider:
         return result
 
     @classmethod
-    def _build_orders(cls, prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> list[Order]:
+    def _build_orders(cls, prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> \
+    list[Order]:
         """Build Order objects from price/amount pairs."""
         return [
             Order(
@@ -85,8 +88,10 @@ class OkexProvider:
                     provider=cls.provider_name,
                     base=base,
                     quote=quote,
-                    buy_price=Decimal(str(price)) * multiplier,
-                    sell_price=Decimal(str(price)) * multiplier,
+                    _buy_price=Decimal(str(price)) * multiplier,
+                    _sell_price=Decimal(str(price)) * multiplier,
+                    buy_fee=Decimal(0.1),
+                    sell_fee=Decimal(0.1),
                     timestamp=now,
                 ),
                 quantity=Decimal(str(amount)),

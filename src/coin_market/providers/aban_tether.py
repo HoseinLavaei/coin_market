@@ -29,11 +29,13 @@ class AbanTetherProvider:
                     data = markets[str(base.value) + str(quote.value)]
             coin = Coin(
                 provider=cls.provider_name,
-                quote=quote,
                 base=base,
-                buy_price=Decimal(str(data["buy_price"])) * multiplier,
-                sell_price=Decimal(str(data["sell_price"])) * multiplier,
+                quote=quote,
+                _buy_price=Decimal(str(data["buy_price"])) * multiplier,
+                _sell_price=Decimal(str(data["sell_price"])) * multiplier,
                 timestamp=datetime.datetime.now(datetime.timezone.utc),
+                buy_fee=Decimal(0.3) if base != Base.USDT else Decimal(0),
+                sell_fee=Decimal(0.3) if base != Base.USDT else Decimal(0),
             )
             result.upsert(coin)
         return result

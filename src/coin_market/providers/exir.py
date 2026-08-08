@@ -33,8 +33,10 @@ class ExirProvider:
                         provider=cls.provider_name,
                         base=base,
                         quote=quote,
-                        buy_price=Decimal(str(price)) * multiplier,
-                        sell_price=Decimal(str(price)) * multiplier,
+                        _buy_price=Decimal(str(price)) * multiplier,
+                        _sell_price=Decimal(str(price)) * multiplier,
+                        buy_fee=Decimal('0.35'),
+                        sell_fee=Decimal('0.35'),
                         timestamp=now,
                     ),
                     quantity=Decimal(str(amount)),
@@ -51,9 +53,9 @@ class ExirProvider:
                 quote_str = "usdt"
                 multiplier = 1
             else:
-                return None  # Unsupported quote
+                return None
 
-            pair_name = f"{base.value.lower()}-{quote_str}"  # e.g., "btc-usdt"
+            pair_name = f"{base.value.lower()}-{quote_str}"
 
             async with semaphore:
                 try:
@@ -61,21 +63,33 @@ class ExirProvider:
                         "https://api.exir.io/v2/orderbook",
                         params={"symbol": pair_name}
                     )
-                    data = json_data.get(pair_name)
-                    if not data or not isinstance(data, dict):
+
+                    # Check if the response contains the expected key
+                    if pair_name not in json_data:
+                        print(f"Exir: No data for symbol '{pair_name}'. Available keys: {list(json_data.keys())}")
                         return None
 
-                    bids_raw = data.get("bids", [])  # list of [price, amount]
-                    asks_raw = data.get("asks", [])  # list of [price, amount]
-                    now = datetime.datetime.now(datetime.timezone.utc)
+                    data = json_data.get(pair_name)
+                    if not data or not isinstance(data, dict):
+                        print(f"Exir: Invalid data for symbol '{pair_name}': {data}")
+                        return None
 
+                    bids_raw = data.get("bids", [])
+                    asks_raw = data.get("asks", [])
+
+                    # If both sides are empty, the pair exists but has no liquidity
+                    if not bids_raw and not asks_raw:
+                        print(f"Exir: Symbol '{pair_name}' has empty orderbook")
+                        return None
+
+                    now = datetime.datetime.now(datetime.timezone.utc)
                     bids_list = build_orders(bids_raw, multiplier, quote, base, now)
                     asks_list = build_orders(asks_raw, multiplier, quote, base, now)
 
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
                 except Exception as e:
-                    print(f"Cant get exir's Orderbook:{e}")
+                    print(f"Exir: Error fetching orderbook for {pair_name}: {e}")
                     return None
 
         # Run all fetch tasks concurrently

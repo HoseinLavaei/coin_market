@@ -21,7 +21,8 @@ class WallexProvider:
         return None
 
     @classmethod
-    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime, key: str = "price") -> list[Order]:
+    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime,
+                          key: str = "price") -> list[Order]:
         """Build Order list from price/quantity entries."""
         return [
             Order(
@@ -29,8 +30,10 @@ class WallexProvider:
                     provider=cls.provider_name,
                     base=b,
                     quote=q,
-                    buy_price=Decimal(str(e[key])) * mult,
-                    sell_price=Decimal(str(e[key])) * mult,
+                    _buy_price=Decimal(str(e[key])) * mult,
+                    _sell_price=Decimal(str(e[key])) * mult,
+                    buy_fee=Decimal(0.3),
+                    sell_fee=Decimal(0.3),
                     timestamp=now,
                 ),
                 quantity=Decimal(str(e["quantity"])),
@@ -61,8 +64,10 @@ class WallexProvider:
             price_coin = Coin(
                 provider=cls.provider_name,
                 base=b,
-                buy_price=buy_price,
-                sell_price=sell_price,
+                _buy_price=buy_price,
+                _sell_price=sell_price,
+                buy_fee=Decimal(0),
+                sell_fee=Decimal(0),
                 quote=q,
                 timestamp=datetime.datetime.now(datetime.timezone.utc),
             )
@@ -128,7 +133,8 @@ class WallexProvider:
         return stats.get("lastPrice") != "-"
 
     @classmethod
-    def _build_orderbook_tasks(cls, sem: asyncio.Semaphore, symbols: dict, quotes: list[Quote], bases: list[Base]) -> list:
+    def _build_orderbook_tasks(cls, sem: asyncio.Semaphore, symbols: dict, quotes: list[Quote],
+                               bases: list[Base]) -> list:
         """Build list of orderbook fetch tasks."""
         tasks = []
         for quote in quotes:

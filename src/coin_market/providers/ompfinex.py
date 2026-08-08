@@ -15,7 +15,8 @@ class OmpfinexProvider:
         return Coins()
 
     @classmethod
-    def _build_orders(cls, prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> list[Order]:
+    def _build_orders(cls, prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> \
+    list[Order]:
         """Build Order objects from price/amount pairs."""
         return [
             Order(
@@ -23,8 +24,10 @@ class OmpfinexProvider:
                     provider=cls.provider_name,
                     base=base,
                     quote=quote,
-                    buy_price=Decimal(str(price)) * multiplier,
-                    sell_price=Decimal(str(price)) * multiplier,
+                    _buy_price=Decimal(str(price)) * multiplier,
+                    _sell_price=Decimal(str(price)) * multiplier,
+                    buy_fee=Decimal(0.35),
+                    sell_fee=Decimal(0.35),
                     timestamp=now,
                 ),
                 quantity=Decimal(str(amount)),

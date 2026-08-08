@@ -2,8 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 
 import sqlalchemy as sa
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import CheckConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 

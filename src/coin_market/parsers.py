@@ -1,5 +1,6 @@
-from typing import cast
 from decimal import Decimal
+from typing import cast
+
 from .provider_name import ProviderName
 
 

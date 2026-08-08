@@ -70,8 +70,10 @@ class RamzinexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
-            buy_price=Decimal(str(buy_price)) * multiplier,
-            sell_price=Decimal(str(sell_price)) * multiplier,
+            _buy_price=Decimal(str(buy_price)) * multiplier,
+            _sell_price=Decimal(str(sell_price)) * multiplier,
+            buy_fee=Decimal(0),
+            sell_fee=Decimal(0),
             quote=quote,
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
@@ -121,8 +123,10 @@ class RamzinexProvider:
                 provider=cls.provider_name,
                 base=b,
                 quote=q,
-                buy_price=price,
-                sell_price=price,
+                _buy_price=price,
+                _sell_price=price,
+                buy_fee=Decimal(0.25),
+                sell_fee=Decimal(0.25),
                 timestamp=now,
             )
             orders.append(Order(coin=coin, quantity=amount))

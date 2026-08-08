@@ -3,10 +3,10 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
-from .provider_name import ProviderName
 from .environment import TIMEZONE
+from .provider_name import ProviderName
 
 
 class Base(Enum):
@@ -29,7 +29,7 @@ class Quote(Enum):
                 return "€"
 
     @classmethod
-    def from_symbol(cls, data: str) -> Quote:
+    def from_symbol(cls, data: str) -> "Quote":
         match data:
             case "RIAL":
                 return cls.RLS
@@ -42,43 +42,58 @@ class Quote(Enum):
 
 
 class Coin(BaseModel):
+    # No frozen constraint – mutable, but we keep raw prices private
     provider: ProviderName
     base: Base
-    buy_price: Decimal
-    sell_price: Decimal
     quote: Quote
+    _buy_price: Decimal = PrivateAttr()
+    _sell_price: Decimal = PrivateAttr()
+    buy_fee: Decimal
+    sell_fee: Decimal
     timestamp: datetime
 
-    model_config = {"frozen": True}
+    def __init__(self, _buy_price: Decimal, _sell_price: Decimal, **data):
+        super().__init__(**data)
+        self._buy_price = _buy_price
+        self._sell_price = _sell_price
+
+    @property
+    def buy_price(self) -> Decimal:
+        return self._buy_price * (Decimal('1') + self.buy_fee / 100)
+
+    @property
+    def sell_price(self) -> Decimal:
+        return self._sell_price * (Decimal('1') - self.sell_fee / 100)
 
     def __str__(self) -> str:
-        formatted_buy = f"{self.buy_price:,}"
-        formatted_sell = f"{self.sell_price:,}"
-        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.provider.value}'s {self.base.value} : Buy: {formatted_buy} {self.quote.get_symbol()} , Sell: {formatted_sell} {self.quote.get_symbol()}"
+        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.provider.value}'s {self.base.value} : Buy: {self.buy_price:,} {self.quote.get_symbol()} , Sell: {self.sell_price:,} {self.quote.get_symbol()}"
 
-    def to_timezone(self) -> Coin:
+    def to_timezone(self) -> "Coin":
         return self.model_copy(update={"timestamp": self.timestamp.astimezone(TIMEZONE)})
-    def apply_fee(self, buy_fee:Decimal, sell_fee:Decimal) -> Coin:
-        return self.model_copy(update={"buy_price": self.buy_price * (1+buy_fee), "sell_price": self.sell_price * (1-sell_fee)})
+
     # ---------- Serialization ----------
     def to_dict(self) -> dict:
         return {
             "provider": self.provider.name,
             "base": self.base.name,
-            "buy_price": str(self.buy_price),
-            "sell_price": str(self.sell_price),
             "quote": self.quote.name,
+            "_buy_price": str(self._buy_price),
+            "_sell_price": str(self._sell_price),
+            "buy_fee": str(self.buy_fee),
+            "sell_fee": str(self.sell_fee),
             "timestamp": self.timestamp.isoformat(),
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> Coin:
+    def from_dict(cls, data: dict) -> "Coin":
         return cls(
             provider=ProviderName[data["provider"]],
             base=Base[data["base"]],
-            buy_price=Decimal(data["buy_price"]),
-            sell_price=Decimal(data["sell_price"]),
             quote=Quote[data["quote"]],
+            _buy_price=Decimal(data["_buy_price"]),
+            _sell_price=Decimal(data["_sell_price"]),
+            buy_fee=Decimal(data["buy_fee"]),
+            sell_fee=Decimal(data["sell_fee"]),
             timestamp=datetime.fromisoformat(data["timestamp"]),
         )
 
@@ -87,14 +102,12 @@ class Order(BaseModel):
     coin: Coin
     quantity: Decimal
 
-    def to_timezone(self) -> Order:
+    def to_timezone(self) -> "Order":
         return Order(coin=self.coin.to_timezone(), quantity=self.quantity)
 
     def __str__(self) -> str:
         return f"{self.coin}, {self.quantity} available"
 
-    def apply_fee(self, buy_fee:Decimal, sell_fee:Decimal) -> Order:
-        return Order(coin=self.coin.apply_fee(buy_fee, sell_fee),quantity=self.quantity)
     # ---------- Serialization ----------
     def to_dict(self) -> dict:
         return {
@@ -103,7 +116,7 @@ class Order(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> Order:
+    def from_dict(cls, data: dict) -> "Order":
         return cls(
             coin=Coin.from_dict(data["coin"]),
             quantity=Decimal(data["quantity"]),
@@ -146,10 +159,12 @@ class OrderBook(BaseModel):
         return Coin(
             provider=first_coin.provider,
             base=first_coin.base,
-            buy_price=avg_buy,
-            sell_price=avg_sell,
             quote=first_coin.quote,
-            timestamp=first_coin.timestamp
+            _buy_price=avg_buy,
+            _sell_price=avg_sell,
+            buy_fee=first_coin.buy_fee,
+            sell_fee=first_coin.sell_fee,
+            timestamp=first_coin.timestamp,
         )
 
     def get_provider(self) -> ProviderName:
@@ -176,15 +191,11 @@ class OrderBook(BaseModel):
         else:
             raise ValueError("Order book is empty")
 
-    def to_timezone(self) -> OrderBook:
+    def to_timezone(self) -> "OrderBook":
         new_asks = [order.to_timezone() for order in self.asks]
         new_bids = [order.to_timezone() for order in self.bids]
         return OrderBook(asks=new_asks, bids=new_bids)
 
-    def apply_fee(self, buy_fee:Decimal, sell_fee:Decimal) -> OrderBook:
-        new_asks = [order.apply_fee(buy_fee, sell_fee) for order in self.asks]
-        new_bids = [order.apply_fee(buy_fee, sell_fee) for order in self.bids]
-        return OrderBook(asks=new_asks, bids=new_bids)
     def to_string(self, volume: Decimal) -> str:
         if not self.asks and not self.bids:
             return "OrderBook(empty)"
@@ -197,7 +208,6 @@ class OrderBook(BaseModel):
             f"bids: {len(self.bids)} levels, total vol: {total_bid_vol:.4f})"
         )
 
-        # Catch only ValueError (raised by get_by_volume when no volume available)
         try:
             vwap_coin = self.get_by_volume(volume)
             return f"{summary}\n  VWAP for 1.0 base: {vwap_coin}"
@@ -217,7 +227,7 @@ class OrderBook(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> OrderBook:
+    def from_dict(cls, data: dict) -> "OrderBook":
         return cls(
             asks=[Order.from_dict(order_data) for order_data in data["asks"]],
             bids=[Order.from_dict(order_data) for order_data in data["bids"]],
@@ -235,14 +245,11 @@ class Coins(BaseModel):
     def get_key_from_details(provider: ProviderName, quote: Quote, base: Base) -> tuple[ProviderName, Quote, Base]:
         return provider, quote, base
 
-    def to_timezone(self) -> Coins:
+    def to_timezone(self) -> "Coins":
         result = Coins()
         for coin in self.coins.values():
             result.upsert(coin.to_timezone())
         return result
-
-    def apply_fee(self, buy_fee:Decimal, sell_fee:Decimal) -> Coins:
-        return Coins(coins={key:value.apply_fee(buy_fee, sell_fee) for key, value in self.coins.items()})
 
     def __str__(self) -> str:
         if not self.coins:
@@ -254,7 +261,7 @@ class Coins(BaseModel):
         return json.dumps([coin.to_dict() for coin in self.coins.values()])
 
     @classmethod
-    def from_json(cls, json_str: str) -> Coins:
+    def from_json(cls, json_str: str) -> "Coins":
         coin_dicts = json.loads(json_str)
         coins = Coins()
         for coin_dict in coin_dicts:
@@ -277,14 +284,11 @@ class OrderBooks(BaseModel):
     def get_key_from_details(provider: ProviderName, quote: Quote, base: Base) -> tuple[ProviderName, Quote, Base]:
         return provider, quote, base
 
-    def to_timezone(self) -> OrderBooks:
+    def to_timezone(self) -> "OrderBooks":
         result = OrderBooks()
         for book in self.books.values():
             result.upsert(book.to_timezone())
         return result
-
-    def apply_fee(self, buy_fee:Decimal, sell_fee:Decimal) -> OrderBooks:
-        return OrderBooks(books={key:value.apply_fee(buy_fee, sell_fee) for key, value in self.books.items()})
 
     def to_string(self, volume: Decimal) -> str:
         if not self.books:
@@ -303,7 +307,7 @@ class OrderBooks(BaseModel):
         return json.dumps([book.to_dict() for book in self.books.values()])
 
     @classmethod
-    def from_json(cls, json_str: str) -> OrderBooks:
+    def from_json(cls, json_str: str) -> "OrderBooks":
         book_dicts = json.loads(json_str)
         books = OrderBooks()
         for book_dict in book_dicts:

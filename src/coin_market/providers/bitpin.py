@@ -31,7 +31,8 @@ class BitpinProvider:
 
             for base in bases:
                 for market in markets:
-                    if market["currency2"]["code"].upper() == quote_string and market["currency1"]["code"].upper() == str(base.value):
+                    if market["currency2"]["code"].upper() == quote_string and market["currency1"][
+                        "code"].upper() == str(base.value):
                         price = Decimal(str(market["price"]))
                         buy_percent = Decimal(str(market.get("otc_buy_percent", "0")))
                         sell_percent = Decimal(str(market.get("otc_sell_percent", "0")))
@@ -42,9 +43,11 @@ class BitpinProvider:
                         coin = Coin(
                             provider=cls.provider_name,
                             base=base,
-                            buy_price=buy_price * multiplier,
-                            sell_price=sell_price * multiplier,
                             quote=quote,
+                            _buy_price=buy_price * multiplier,
+                            _sell_price=sell_price * multiplier,
+                            buy_fee=Decimal(0),
+                            sell_fee=Decimal(0),
                             timestamp=datetime.datetime.now(datetime.timezone.utc),
                         )
                         result.upsert(coin)
@@ -104,6 +107,7 @@ class BitpinProvider:
 
         return final_result
 
+
 async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provider_name):
     async with semaphore:
         try:
@@ -115,37 +119,28 @@ async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provide
 
             now = datetime.datetime.now(datetime.timezone.utc)
 
-            # Build asks: each coin has both prices set to the ask price
-            asks_list = [
-                Order(
-                    coin=Coin(
-                        provider=provider_name,
-                        base=base,
-                        quote=quote,
-                        buy_price=Decimal(str(price)) * multiplier,
-                        sell_price=Decimal(str(price)) * multiplier,
-                        timestamp=now,
-                    ),
-                    quantity=Decimal(str(amount)),
-                )
-                for price, amount in asks_raw
-            ]
+            def get_list(raw) -> list[Order]:
+                order_list = [
+                    Order(
+                        coin=Coin(
+                            provider=provider_name,
+                            base=base,
+                            quote=quote,
+                            _buy_price=Decimal(str(price)) * multiplier,
+                            _sell_price=Decimal(str(price)) * multiplier,
+                            buy_fee=Decimal(0.35),
+                            sell_fee=Decimal(0.35),
+                            timestamp=now,
+                        ),
+                        quantity=Decimal(str(amount)),
+                    )
+                    for price, amount in raw
+                ]
 
-            # Build bids: each coin has both prices set to the bid price
-            bids_list = [
-                Order(
-                    coin=Coin(
-                        provider=provider_name,
-                        base=base,
-                        quote=quote,
-                        buy_price=Decimal(str(price)) * multiplier,
-                        sell_price=Decimal(str(price)) * multiplier,
-                        timestamp=now,
-                    ),
-                    quantity=Decimal(str(amount)),
-                )
-                for price, amount in bids_raw
-            ]
+                return order_list
+
+            asks_list = get_list(asks_raw)
+            bids_list = get_list(bids_raw)
 
             return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 
