@@ -1,4 +1,5 @@
 import asyncio
+import signal
 import sys
 from datetime import datetime
 from decimal import Decimal
@@ -471,12 +472,27 @@ async def run_bot():
 
     await app.updater.start_polling()
 
+    # ─── Signal handling ──────────────────────────────────────
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def signal_handler():
+        print("Received termination signal, shutting down...")
+        shutdown_event.set()
+
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+
+    # Wait until a signal is received (or KeyboardInterrupt)
     try:
-        while True:
-            await asyncio.sleep(1)
-    except (KeyboardInterrupt, SystemExit):
-        if app.updater:
-            await app.updater.stop()
-        await app.stop()
-        await close_db()
-        await app.shutdown()
+        await shutdown_event.wait()
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, shutting down...")
+
+    # ─── Cleanup ──────────────────────────────────────────────
+    print("EXITING ....")
+    if app.updater:
+        await app.updater.stop()
+    await app.stop()
+    await close_db()
+    await app.shutdown()

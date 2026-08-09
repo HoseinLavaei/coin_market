@@ -11,6 +11,7 @@ services:
         condition: service_healthy
     restart: always
     network_mode: host
+    stop_grace_period: 60s
   db:
     image: timescale/timescaledb:latest-pg16
     container_name: coin-market-db
@@ -27,6 +28,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
+    stop_grace_period: 60s
 volumes:
   postgres_data:
