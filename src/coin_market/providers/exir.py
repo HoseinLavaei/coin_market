@@ -25,7 +25,8 @@ class ExirProvider:
         semaphore = asyncio.Semaphore(2)
         result = OrderBooks()
 
-        def build_orders(prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> list[Order]:
+        def build_orders(prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> list[
+            Order]:
             """Build Order objects from price/amount pairs."""
             return [
                 Order(

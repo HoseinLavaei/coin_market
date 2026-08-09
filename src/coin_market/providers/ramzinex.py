@@ -22,12 +22,12 @@ class RamzinexProvider:
         raise ValueError(f"Unsupported type: {type(raw_value)}")
 
     @classmethod
-    def _get_quote_mapping(cls, quote: Quote) -> tuple[str, int] | None:
-        """Map Quote enum to Ramzinex currency symbol and multiplier."""
+    def _get_quote_string(cls, quote: Quote) -> str | None:
+        """Map Quote enum to Ramzinex currency symbol."""
         if quote == Quote.RLS:
-            return "irr", 10
+            return "irr"
         elif quote == Quote.USD:
-            return "usdt", 1
+            return "usdt"
         return None
 
     @classmethod
@@ -50,7 +50,7 @@ class RamzinexProvider:
         return market_map
 
     @classmethod
-    def _parse_otc_market(cls, market: dict, quote: Quote, bases: list[Base], multiplier: int) -> Coin | None:
+    def _parse_otc_market(cls, market: dict, quote: Quote, bases: list[Base]) -> Coin | None:
         """Parse single OTC market entry and return Coin if valid, else None."""
         buy_price = market.get("buy")
         sell_price = market.get("sell")
@@ -70,8 +70,8 @@ class RamzinexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
-            _buy_price=Decimal(str(buy_price)) * multiplier,
-            _sell_price=Decimal(str(sell_price)) * multiplier,
+            _buy_price=Decimal(str(buy_price)),
+            _sell_price=Decimal(str(sell_price)),
             buy_fee=Decimal(0),
             sell_fee=Decimal(0),
             quote=quote,
@@ -91,30 +91,29 @@ class RamzinexProvider:
 
         result = Coins()
         for quote in quotes:
-            mapping = cls._get_quote_mapping(quote)
-            if not mapping:
+            currency_string = cls._get_quote_string(quote)
+            if not currency_string:
                 continue
 
-            currency_string, multiplier = mapping
             for market in pairs_data["data"]:
                 if market["quote_currency_symbol"]["en"] != currency_string:
                     continue
 
-                coin = cls._parse_otc_market(market, quote, bases, multiplier)
+                coin = cls._parse_otc_market(market, quote, bases)
                 if coin:
                     result.upsert(coin)
 
         return result
 
     @classmethod
-    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime) -> list[Order]:
+    def _build_order_list(cls, entries: list, q: Quote, b: Base, now: datetime.datetime) -> list[Order]:
         """Build Order list from price/amount entries."""
         orders = []
         for entry in entries:
             if not isinstance(entry, (list, tuple)) or len(entry) < 2:
                 continue
             try:
-                price = cls._clean_number(entry[0]) * mult
+                price = cls._clean_number(entry[0])
                 amount = cls._clean_number(entry[1])
             except (ValueError, TypeError):
                 continue
@@ -134,7 +133,7 @@ class RamzinexProvider:
         return orders
 
     @classmethod
-    async def _fetch_single_orderbook(cls, semaphore: asyncio.Semaphore, pid: int, b: Base, q: Quote, mult: int):
+    async def _fetch_single_orderbook(cls, semaphore: asyncio.Semaphore, pid: int, b: Base, q: Quote):
         """Fetch a single orderbook."""
         async with semaphore:
             try:
@@ -156,8 +155,8 @@ class RamzinexProvider:
 
             now = datetime.datetime.now(datetime.timezone.utc)
 
-            bids_list = cls._build_order_list(bids_raw, mult, q, b, now)
-            asks_list = cls._build_order_list(asks_raw, mult, q, b, now)
+            bids_list = cls._build_order_list(bids_raw, q, b, now)
+            asks_list = cls._build_order_list(asks_raw, q, b, now)
 
             if not bids_list and not asks_list:
                 return None
@@ -175,15 +174,13 @@ class RamzinexProvider:
         tasks = []
 
         for quote in quotes:
-            mapping = cls._get_quote_mapping(quote)
-            if not mapping:
+            quote_symbol = cls._get_quote_string(quote)
+            if not quote_symbol:
                 continue
-
-            quote_symbol, multiplier = mapping
             for base in bases:
                 pair_id: int | None = market_map.get((quote_symbol, base.value.upper()))
                 if pair_id is not None:
-                    tasks.append(cls._fetch_single_orderbook(semaphore, pair_id, base, quote, multiplier))
+                    tasks.append(cls._fetch_single_orderbook(semaphore, pair_id, base, quote))
 
         results = await asyncio.gather(*tasks)
 

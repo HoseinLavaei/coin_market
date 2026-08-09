@@ -16,14 +16,19 @@ def build_subscription_description(
 ) -> str:
     parts = []
     if provider:
-        parts.append(f"provider={provider}")
+        parts.append(f"🏛️ provider={provider}")
     if type_filter:
-        parts.append(f"type={type_filter}")
+        if type_filter == "OTC":
+            parts.append("💰 type=OTC")
+        elif type_filter == "P2P":
+            parts.append("🤝 type=P2P")
+        else:
+            parts.append(f"type={type_filter}")
     if volume is not None:
-        parts.append(f"volume={volume}")
+        parts.append(f"📦 volume={volume}")
     if repeat_interval is not None:
-        parts.append(f"repeat={repeat_interval}s")
-    return " + ".join(parts) if parts else "all data"
+        parts.append(f"⏱️ repeat={repeat_interval}s")
+    return " + ".join(parts) if parts else "📊 all data"
 
 
 class Subscription(Base):

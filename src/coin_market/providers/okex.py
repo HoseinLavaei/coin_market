@@ -80,7 +80,7 @@ class OkexProvider:
 
     @classmethod
     def _build_orders(cls, prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> \
-    list[Order]:
+            list[Order]:
         """Build Order objects from price/amount pairs."""
         return [
             Order(

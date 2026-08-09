@@ -47,14 +47,16 @@ class TabdealProvider:
                 if not from_data or not to_data:
                     return None
 
-                # Extract the price_inverse from the first tier (smallest amount)
-                # price_inverse is the amount of quote currency needed to buy 1 base currency.
-                buy_price_raw = Decimal(from_data[0].get("price_inverse", "0"))
-                sell_price_raw = Decimal(to_data[0].get("price_inverse", "0"))
+                # The API returns price in the quote currency per 1 base (Toman per 1 USDT)
+                # No inversion needed – just apply the multiplier.
+                raw_buy_price = Decimal(from_data[0].get("price", "0"))
+                raw_sell_price = Decimal(to_data[0].get("price", "0"))
 
-                # Apply multiplier (10 for RLS to convert from Toman to Rial, 1 for USD)
-                buy_price = buy_price_raw * multiplier
-                sell_price = sell_price_raw * multiplier
+                if raw_buy_price == Decimal(0) or raw_sell_price == Decimal(0):
+                    return None
+
+                buy_price = raw_buy_price * multiplier
+                sell_price = raw_sell_price * multiplier
 
                 _coin = Coin(
                     provider=cls.provider_name,
@@ -62,8 +64,8 @@ class TabdealProvider:
                     quote=_quote,
                     _buy_price=buy_price,
                     _sell_price=sell_price,
-                    buy_fee=Decimal('0'),  # OTC has zero commission
-                    sell_fee=Decimal('0'),  # OTC has zero commission
+                    buy_fee=Decimal('0'),
+                    sell_fee=Decimal('0'),
                     timestamp=datetime.datetime.now(datetime.timezone.utc),
                 )
                 return (_quote, _base), _coin
@@ -94,14 +96,31 @@ class TabdealProvider:
         return None
 
     @classmethod
-    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime,
-                          reverse: bool = False) -> list[Order]:
+    def _build_order_list(
+            cls,
+            entries: list,
+            mult: int,
+            q: Quote,
+            b: Base,
+            now: datetime.datetime,
+            reverse: bool = False,
+            amount_in_quote: bool = False,
+    ) -> list[Order]:
         """Build Order list from price/amount entries."""
         orders = []
         for entry in entries:
-            # The price from API is in the quote currency (Toman or USDT)
             price = Decimal(str(entry["price"])) * mult
-            amount = Decimal(str(entry["amount"]))
+            amount_raw = Decimal(str(entry["amount"]))
+
+            if amount_in_quote:
+                # Convert quote currency amount to base (USDT)
+                if price != Decimal(0):
+                    amount = amount_raw / price
+                else:
+                    amount = Decimal(0)
+            else:
+                amount = amount_raw
+
             coin = Coin(
                 provider=cls.provider_name,
                 base=b,
@@ -141,21 +160,12 @@ class TabdealProvider:
                     return None
 
                 now = datetime.datetime.now(datetime.timezone.utc)
-                # from_data corresponds to asks (you pay base to get quote? Actually we need to interpret correctly)
-                # For orderbook, we need bids and asks.
-                # Since the API is tiered, we treat each tier as an order level.
-                # Asks: orders where you sell base (USDT) for quote (IRT) => from_data?
-                # When from_currency=USDT and to_currency=IRT, from_data gives the price in IRT per 1 USDT.
-                # That is the price you receive when selling USDT (sell price). So from_data = bids? Actually bids are buy orders.
-                # Let's define:
-                #   Asks: people selling base (USDT) at a price => they want quote (IRT). So the price is IRT per USDT.
-                #   Bids: people buying base (USDT) at a price => they offer quote (IRT). So price is IRT per USDT.
-                # The API returns from_amount_data (converting from_currency to to_currency) which is the amount of to_currency you get per 1 from_currency.
-                # That is the price in quote currency per 1 base.
-                # So from_amount_data gives the price for buying quote with base (i.e., selling base). That corresponds to asks? Actually when you sell base, you get quote, so the price is the bid? No.
-                # Let's keep it simple: we treat both as orders and sort appropriately.
-                asks_list = cls._build_order_list(from_data, mult, q, b, now, reverse=False)
-                bids_list = cls._build_order_list(to_data, mult, q, b, now, reverse=True)
+
+                # Asks: from_data gives prices and amounts in base currency (USDT)
+                asks_list = cls._build_order_list(from_data, mult, q, b, now, reverse=False, amount_in_quote=False)
+
+                # Bids: to_data gives prices, but amounts are in quote currency (IRT) – convert to USDT
+                bids_list = cls._build_order_list(to_data, mult, q, b, now, reverse=True, amount_in_quote=True)
 
                 return (q, b), OrderBook(asks=asks_list, bids=bids_list)
 

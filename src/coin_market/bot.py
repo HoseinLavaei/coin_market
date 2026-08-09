@@ -12,6 +12,7 @@ from .db import (
     add_subscription, get_subscriptions_for_chat, get_active_subscriptions,
     pause_subscriptions_for_chat, resume_subscriptions_for_chat, delete_subscriptions_for_chat
 )
+from .environment import TIMEZONE, TELEGRAM_TOKEN, INTERVAL
 from .filters import filter_coins_by_provider, filter_orderbooks_by_provider
 from .message_builder import build_prices_output
 from .parsers import parse_prices_args
@@ -26,19 +27,20 @@ from .providers.ramzinex import RamzinexProvider
 from .providers.tabdeal import TabdealProvider
 from .providers.wallex import WallexProvider
 from .subscription import build_subscription_description
-from .environment import TIMEZONE, TELEGRAM_TOKEN, INTERVAL
 
 # ─── Usage message ─────────────────────────────────────────────
 USAGE_MESSAGE = (
-        "Usage:\n"
-        "/prices [--provider NAME | provider=NAME]\n"
-        "        [--type otc|p2p | type=otc|p2p]\n"
-        "        [--volume NUM | volume=NUM]\n"
-        "        [--repeat SEC | repeat=SEC]\n"
-        "        [--stop | stop]              (pause all)\n"
-        "        [--resume]                   (resume all)\n"
-        "        [--delete]                   (delete all)\n"
-        "        [--list]                     (list all)\n\n"
+        "📖 Usage:\n"
+        "/prices [options]\n\n"
+        "Options:\n"
+        "  🔹 --provider NAME   | provider=NAME   (filter by provider)\n"
+        "  🔹 --type otc|p2p    | type=otc|p2p    (show only OTC or P2P)\n"
+        "  🔹 --volume NUM      | volume=NUM      (volume for VWAP calculation)\n"
+        "  🔹 --repeat SEC      | repeat=SEC      (start auto-updates every SEC seconds)\n"
+        "  🔹 --stop            | stop            (pause all subscriptions)\n"
+        "  🔹 --resume          | resume          (resume all paused subscriptions)\n"
+        "  🔹 --delete          | delete          (delete all subscriptions)\n"
+        "  🔹 --list            | list            (list your subscriptions)\n\n"
         "Valid providers: " + ", ".join([p.value for p in ProviderName])
 )
 
@@ -49,6 +51,7 @@ _cache_updated_at = datetime.now(TIMEZONE)
 
 # ─── Subscription jobs ──────────────────────────────────────
 _subscription_jobs: dict[int, Job] = {}
+
 
 # ─── Data fetching ────────────────────────────────────────────
 
@@ -118,10 +121,11 @@ async def send_market_data(
         coins = _cached_coins
         books = _cached_orderbooks
 
+    # Use the message builder to respect type_filter
     content = build_prices_output(coins, books, type_filter, volume)
 
-    prefix = "Auto-update" if is_auto else "Market data"
-    msg = f"{prefix} ({filter_desc}, updated at {timestamp})\n\n{content}"
+    prefix = "🔄 Auto-update" if is_auto else "📊 Market data"
+    msg = f"{prefix} ({filter_desc}, 🕒 updated at {timestamp})\n\n{content}"
 
     if len(msg) > 4096:
         for i in range(0, len(msg), 4096):
@@ -238,9 +242,9 @@ async def _handle_stop(update: Update, _context: ContextTypes.DEFAULT_TYPE, chat
 
     if count > 0:
         remove_jobs_for_chat(chat_id)
-        await target.reply_text(f"Paused {count} subscription(s) for this chat. Use /prices resume to restart.")
+        await target.reply_text(f"⏸️ Paused {count} subscription(s) for this chat. Use /prices resume to restart.")
     else:
-        await target.reply_text("No active subscriptions to pause.")
+        await target.reply_text("ℹ️ No active subscriptions to pause.")
 
 
 async def _handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
@@ -255,15 +259,15 @@ async def _handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE, cha
         subs = await get_subscriptions_for_chat(chat_id)
         job_queue = context.job_queue
         if job_queue is None:
-            await target.reply_text("Job queue not available.")
+            await target.reply_text("❌ Job queue not available.")
             return
         for sub in subs:
             if sub.status == "active" and sub.repeat_interval is not None:
                 job = schedule_subscription_job(job_queue, sub)
                 _subscription_jobs[sub.id] = job
-        await target.reply_text(f"Resumed {count} paused subscription(s) for this chat.")
+        await target.reply_text(f"▶️ Resumed {count} paused subscription(s) for this chat.")
     else:
-        await target.reply_text("No paused subscriptions to resume.")
+        await target.reply_text("ℹ️ No paused subscriptions to resume.")
 
 
 async def _handle_delete(update: Update, _context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
@@ -276,9 +280,9 @@ async def _handle_delete(update: Update, _context: ContextTypes.DEFAULT_TYPE, ch
 
     if count > 0:
         remove_jobs_for_chat(chat_id)
-        await target.reply_text(f"Deleted {count} subscription(s) for this chat.")
+        await target.reply_text(f"🗑️ Deleted {count} subscription(s) for this chat.")
     else:
-        await target.reply_text("No subscriptions to delete.")
+        await target.reply_text("ℹ️ No subscriptions to delete.")
 
 
 async def _handle_list(update: Update, chat_id: int) -> None:
@@ -288,18 +292,19 @@ async def _handle_list(update: Update, chat_id: int) -> None:
     subs = await get_subscriptions_for_chat(chat_id)
 
     if not subs:
-        await target.reply_text("No subscriptions for this chat.")
+        await target.reply_text("📭 No subscriptions for this chat.")
         return
 
-    lines = ["Your subscriptions:"]
+    lines = ["📋 Your subscriptions:"]
     for sub in subs:
+        status_emoji = "✅" if sub.status == "active" else "⏸️"
         desc = build_subscription_description(
             sub.provider,
             sub.type_filter,
             sub.volume,
             sub.repeat_interval,
         )
-        lines.append(f"  #{sub.id}: {desc} (status: {sub.status})")
+        lines.append(f"  {status_emoji} #{sub.id}: {desc} (status: {sub.status})")
 
     msg = "\n".join(lines)
     if len(msg) > 4096:
@@ -332,7 +337,7 @@ async def _handle_watch(
 
     job_queue = context.job_queue
     if job_queue is None:
-        await target.reply_text("Job queue not available.")
+        await target.reply_text("❌ Job queue not available.")
         return
     job = schedule_subscription_job(job_queue, sub)
     _subscription_jobs[sub.id] = job
@@ -344,8 +349,7 @@ async def _handle_watch(
         None,
     )
     await target.reply_text(
-        f"Subscription #{sub.id} created. Auto-updates every {interval}s with filters: {filter_desc}. "
-        "First update sent immediately.\n"
+        f"✅ Subscription #{sub.id} created. Auto-updates every {interval}s with filters: {filter_desc}.\n"
         "Commands: /prices stop (pause all), /prices resume, /prices delete, /prices list"
     )
 
@@ -398,7 +402,7 @@ async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         provider, type_filter, volume, repeat_interval, stop_flag = parse_prices_args(args)
     except ValueError as e:
         if target is not None:
-            await target.reply_text(f"Error: {e}\n\n{USAGE_MESSAGE}")
+            await target.reply_text(f"❌ Error: {e}\n\n{USAGE_MESSAGE}")
         return
 
     if stop_flag:

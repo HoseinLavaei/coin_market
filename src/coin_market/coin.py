@@ -9,6 +9,14 @@ from .environment import TIMEZONE
 from .provider_name import ProviderName
 
 
+def indent_text(text: str, spaces: int = 4) -> str:
+    """Indent every line of a multi-line string by `spaces` spaces."""
+    if not text:
+        return text
+    indent = " " * spaces
+    return "\n".join(f"{indent}{line}" for line in text.splitlines())
+
+
 class Base(Enum):
     USDT = "USDT"
     BTC = "BTC"
@@ -59,16 +67,26 @@ class Coin(BaseModel):
 
     @property
     def buy_price(self) -> Decimal:
-        return self._buy_price * (Decimal('1') + self.buy_fee / 100)
+        return self._buy_price / (Decimal('1') - self.buy_fee / 100)
 
     @property
     def sell_price(self) -> Decimal:
-        return self._sell_price * (Decimal('1') - self.sell_fee / 100)
+        return self._sell_price / (Decimal('1') + self.sell_fee / 100)
+
+    def get_formatted_price(self) -> tuple[str, str]:
+        formatted_buy = f"{self.buy_price:,}"  # adds thousands separators
+        formatted_sell = f"{self.sell_price:,}"  # adds thousands separators
+        if '.' in formatted_buy:
+            formatted_buy = formatted_buy.rstrip('0').rstrip('.')
+        if '.' in formatted_sell:
+            formatted_sell = formatted_sell.rstrip('0').rstrip('.')
+        return formatted_buy, formatted_sell
 
     def __str__(self) -> str:
-        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.provider.value}'s {self.base.value} : Buy: {self.buy_price:,} {self.quote.get_symbol()} , Sell: {self.sell_price:,} {self.quote.get_symbol()}"
+        formatted_buy, formatted_sell = self.get_formatted_price()
+        return f"{self.provider.value} {self.base.value}\n    🟢 Buy: {formatted_buy} {self.quote.get_symbol()}\n    🔴 Sell: {formatted_sell} {self.quote.get_symbol()}"
 
-    def to_timezone(self) -> "Coin":
+    def to_timezone(self) -> Coin:
         return self.model_copy(update={"timestamp": self.timestamp.astimezone(TIMEZONE)})
 
     # ---------- Serialization ----------
@@ -85,7 +103,7 @@ class Coin(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Coin":
+    def from_dict(cls, data: dict) -> Coin:
         return cls(
             provider=ProviderName[data["provider"]],
             base=Base[data["base"]],
@@ -106,7 +124,9 @@ class Order(BaseModel):
         return Order(coin=self.coin.to_timezone(), quantity=self.quantity)
 
     def __str__(self) -> str:
-        return f"{self.coin}, {self.quantity} available"
+        # Format price with thousands separators and remove trailing zeros
+        price_str, _ = self.coin.get_formatted_price()
+        return f"📊 {self.coin.base.value} @ {price_str} {self.coin.quote.get_symbol()} | 📦 Vol: {self.quantity:,.2f} {self.coin.base.value}"
 
     # ---------- Serialization ----------
     def to_dict(self) -> dict:
@@ -198,23 +218,27 @@ class OrderBook(BaseModel):
 
     def to_string(self, volume: Decimal) -> str:
         if not self.asks and not self.bids:
-            return "OrderBook(empty)"
+            return "📭 OrderBook(empty)"
 
         total_ask_vol = sum(order.quantity for order in self.asks)
         total_bid_vol = sum(order.quantity for order in self.bids)
 
         summary = (
-            f"OrderBook (asks: {len(self.asks)} levels, total vol: {total_ask_vol:.4f} | "
-            f"bids: {len(self.bids)} levels, total vol: {total_bid_vol:.4f})"
+            f"📖 OrderBook\n"
+            f"    📈 Asks: {len(self.asks)} levels, total vol: {total_ask_vol:.4f}\n"
+            f"    📉 Bids: {len(self.bids)} levels, total vol: {total_bid_vol:.4f}"
         )
 
         try:
             vwap_coin = self.get_by_volume(volume)
-            return f"{summary}\n  VWAP for 1.0 base: {vwap_coin}"
+            # vwap_coin.__str__ is multi-line (provider, buy, sell). Indent each line.
+            vwap_lines = str(vwap_coin).splitlines()
+            vwap_indented = "\n".join(f"    {line}" for line in vwap_lines)
+            return f"{summary}\n    📊 VWAP for {volume} base:\n{vwap_indented}"
         except ValueError:
             best_ask = self.asks[0].coin.sell_price if self.asks else None
             best_bid = self.bids[0].coin.buy_price if self.bids else None
-            return f"{summary}\n  Best Ask: {best_ask}, Best Bid: {best_bid}"
+            return f"{summary}\n    Best Ask: {best_ask}, Best Bid: {best_bid}"
 
     def __str__(self) -> str:
         return self.to_string(Decimal(1))
@@ -253,8 +277,10 @@ class Coins(BaseModel):
 
     def __str__(self) -> str:
         if not self.coins:
-            return "(No coins)"
-        return "\n\n".join(str(coin) for coin in self.coins.values())
+            return "💰 OTC prices:  (No coins)"
+        content = "\n\n".join(str(coin) for coin in self.coins.values())
+        indented = indent_text(content, spaces=4)
+        return f"💰 OTC prices:\n{indented}"
 
     # ---------- Serialization ----------
     def to_json(self) -> str:
@@ -292,12 +318,12 @@ class OrderBooks(BaseModel):
 
     def to_string(self, volume: Decimal) -> str:
         if not self.books:
-            return "OrderBooks(empty)"
+            return "🤝 P2P prices: (No order books)"
         lines = []
         for (provider, quote, base), book in self.books.items():
-            book_str = book.to_string(volume).replace("\n", "\n  ")
-            lines.append(f"{provider.value}/{quote.value}/{base.value}:\n  {book_str}")
-        return "OrderBooks:\n" + "\n\n".join(lines)
+            book_str = indent_text(book.to_string(volume), 4)
+            lines.append(f"📚 {provider.value}/{quote.value}/{base.value}:\n{book_str}")
+        return "🤝 P2P prices:\n" + indent_text("\n\n".join(lines), 4)
 
     def __str__(self) -> str:
         return self.to_string(Decimal(1))
@@ -307,7 +333,7 @@ class OrderBooks(BaseModel):
         return json.dumps([book.to_dict() for book in self.books.values()])
 
     @classmethod
-    def from_json(cls, json_str: str) -> "OrderBooks":
+    def from_json(cls, json_str: str) -> OrderBooks:
         book_dicts = json.loads(json_str)
         books = OrderBooks()
         for book_dict in book_dicts:
