@@ -9,11 +9,9 @@ from ..provider_name import ProviderName
 
 class NobitexProvider:
     provider_name = ProviderName.NOBITEX
-    """Nobitex exchange API provider."""
 
     @classmethod
     def _parse_market_data(cls, market_key: str, market_data: dict, bases: list[Base], quote: Quote) -> Coin | None:
-        """Parse a single market entry and return a Coin if valid, else None."""
         base_str = market_key.split("-")[0].upper()
         try:
             base = Base(base_str)
@@ -24,8 +22,8 @@ class NobitexProvider:
             return None
 
         try:
-            buy_price = Decimal(str(market_data["bestBuy"]))
-            sell_price = Decimal(str(market_data["bestSell"]))
+            buy_price = Decimal(str(market_data["bestBuy"])) / 10
+            sell_price = Decimal(str(market_data["bestSell"])) / 10
         except (KeyError, ValueError):
             return None
 
@@ -42,14 +40,13 @@ class NobitexProvider:
 
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
-        result: Coins = Coins()
+        result = Coins()
         for quote in quotes:
-            currency_string = "rls" if quote == Quote.RLS else "usdt"
+            currency_string = "rls" if quote == Quote.TMN else "usdt"
             params = {
                 "srcCurrency": ",".join(str(b.value).lower() for b in bases),
                 "dstCurrency": currency_string,
             }
-
             try:
                 json_data = await get_json("https://apiv2.nobitex.ir/market/stats", params)
             except (OSError, ValueError, TimeoutError):
@@ -72,33 +69,27 @@ class NobitexProvider:
         semaphore = asyncio.Semaphore(5)
 
         async def fetch_pair(quote: Quote, base: Base):
-            # Map quote to Nobitex's currency string
-            quote_str = "IRT" if quote == Quote.RLS else "USDT"
-            pair = f"{base.value}{quote_str}"  # e.g., "BTCIRT" or "BTCUSDT"
-
+            quote_str = "IRT" if quote == Quote.TMN else "USDT"
+            pair = f"{base.value}{quote_str}"
             async with semaphore:
                 try:
                     url = f"https://apiv2.nobitex.ir/v3/orderbook/{pair}"
                     data = await get_json(url)
-
                     if data.get("status") != "ok":
                         return None
 
-                    bids_raw = data.get("bids", [])  # list of [price, amount]
-                    asks_raw = data.get("asks", [])  # list of [price, amount]
+                    bids_raw = data.get("bids", [])
+                    asks_raw = data.get("asks", [])
                     now = datetime.datetime.now(datetime.timezone.utc)
 
-                    # ---- Build BIDS list ----
-                    # For each bid, both buy_price and sell_price are set to the bid price.
-                    # get_by_volume uses coin.buy_price when consuming bids.
                     bids_list = [
                         Order(
                             coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
-                                _buy_price=Decimal(str(price)),
-                                _sell_price=Decimal(str(price)),
+                                _buy_price=Decimal(str(price)) / 10,
+                                _sell_price=Decimal(str(price)) / 10,
                                 buy_fee=Decimal(0.25),
                                 sell_fee=Decimal(0.25),
                                 timestamp=now,
@@ -108,17 +99,14 @@ class NobitexProvider:
                         for price, amount in bids_raw
                     ]
 
-                    # ---- Build ASKS list ----
-                    # For each ask, both prices are set to the ask price.
-                    # get_by_volume uses coin.sell_price when consuming asks.
                     asks_list = [
                         Order(
                             coin=Coin(
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
-                                _buy_price=Decimal(str(price)),
-                                _sell_price=Decimal(str(price)),
+                                _buy_price=Decimal(str(price)) / 10,
+                                _sell_price=Decimal(str(price)) / 10,
                                 buy_fee=Decimal(0.25),
                                 sell_fee=Decimal(0.25),
                                 timestamp=now,
@@ -132,19 +120,12 @@ class NobitexProvider:
 
                 except Exception as e:
                     print(f"Cant get nobitex's Orderbook:{e}")
-                    # Optionally log the error here
                     return None
 
-        # Build all tasks
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
-
-        # Run all fetch tasks concurrently
         results = await asyncio.gather(*tasks)
-
-        # Aggregate successful results
         for r in results:
             if r is not None:
                 _, orderbook = r
                 result.upsert(orderbook)
-
         return result

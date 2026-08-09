@@ -19,11 +19,9 @@ class BitpinProvider:
         result: Coins = Coins()
         for quote in quotes:
             quote_string = ""
-            multiplier = 1
             match quote:
-                case Quote.RLS:
+                case Quote.TMN:
                     quote_string = "IRT"
-                    multiplier = 10
                 case Quote.USD:
                     quote_string = "USDT"
                 case _:
@@ -44,8 +42,8 @@ class BitpinProvider:
                             provider=cls.provider_name,
                             base=base,
                             quote=quote,
-                            _buy_price=buy_price * multiplier,
-                            _sell_price=sell_price * multiplier,
+                            _buy_price=buy_price,
+                            _sell_price=sell_price,
                             buy_fee=Decimal(0),
                             sell_fee=Decimal(0),
                             timestamp=datetime.datetime.now(datetime.timezone.utc),
@@ -72,12 +70,10 @@ class BitpinProvider:
 
         for quote in quotes:
             # Map Quote enum to Bitpin's currency code and multiplier
-            if quote == Quote.RLS:
+            if quote == Quote.TMN:
                 quote_string = "IRT"
-                multiplier = 10
             elif quote == Quote.USD:
                 quote_string = "USDT"
-                multiplier = 1
             else:
                 continue  # Skip unsupported quotes
 
@@ -89,7 +85,6 @@ class BitpinProvider:
                             market_id,
                             base,
                             quote,
-                            multiplier,
                             semaphore,
                             cls.provider_name,
                         )
@@ -108,7 +103,7 @@ class BitpinProvider:
         return final_result
 
 
-async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provider_name):
+async def fetch_orderbook(market_id, base, quote, semaphore, provider_name):
     async with semaphore:
         try:
             url = f"https://api.bitpin.ir/v4/mth/orderbook/{market_id}/"
@@ -126,8 +121,8 @@ async def fetch_orderbook(market_id, base, quote, multiplier, semaphore, provide
                             provider=provider_name,
                             base=base,
                             quote=quote,
-                            _buy_price=Decimal(str(price)) * multiplier,
-                            _sell_price=Decimal(str(price)) * multiplier,
+                            _buy_price=Decimal(str(price)),
+                            _sell_price=Decimal(str(price)),
                             buy_fee=Decimal(0.35),
                             sell_fee=Decimal(0.35),
                             timestamp=now,

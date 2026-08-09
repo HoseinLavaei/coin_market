@@ -12,16 +12,16 @@ class WallexProvider:
     provider_name = ProviderName.WALLEX
 
     @classmethod
-    def _get_quote_mapping(cls, quote: Quote) -> tuple[str, int] | None:
-        """Map Quote enum to Wallex currency code and multiplier."""
-        if quote == Quote.RLS:
-            return "TMN", 10
+    def _get_quote_mapping(cls, quote: Quote) -> str | None:
+        """Map Quote enum to Wallex currency code."""
+        if quote == Quote.TMN:
+            return "TMN"
         elif quote == Quote.USD:
-            return "USDT", 1
+            return "USDT"
         return None
 
     @classmethod
-    def _build_order_list(cls, entries: list, mult: int, q: Quote, b: Base, now: datetime.datetime,
+    def _build_order_list(cls, entries: list, q: Quote, b: Base, now: datetime.datetime,
                           key: str = "price") -> list[Order]:
         """Build Order list from price/quantity entries."""
         return [
@@ -30,8 +30,8 @@ class WallexProvider:
                     provider=cls.provider_name,
                     base=b,
                     quote=q,
-                    _buy_price=Decimal(str(e[key])) * mult,
-                    _sell_price=Decimal(str(e[key])) * mult,
+                    _buy_price=Decimal(str(e[key])),
+                    _sell_price=Decimal(str(e[key])),
                     buy_fee=Decimal(0.3),
                     sell_fee=Decimal(0.3),
                     timestamp=now,
@@ -42,7 +42,7 @@ class WallexProvider:
         ]
 
     @classmethod
-    async def _fetch_otc_prices(cls, sem: asyncio.Semaphore, sym: str, b: Base, q: Quote, mult: int):
+    async def _fetch_otc_prices(cls, sem: asyncio.Semaphore, sym: str, b: Base, q: Quote):
         """Fetch OTC buy/sell prices for a symbol."""
         async with sem:
             try:
@@ -56,8 +56,8 @@ class WallexProvider:
                 return None
 
             try:
-                buy_price = Decimal(str(buy_res["result"]["price"]).rstrip("0").rstrip(",")) * mult
-                sell_price = Decimal(str(sell_res["result"]["price"]).rstrip("0").rstrip(",")) * mult
+                buy_price = Decimal(str(buy_res["result"]["price"]).rstrip("0").rstrip(","))
+                sell_price = Decimal(str(sell_res["result"]["price"]).rstrip("0").rstrip(","))
             except (KeyError, ValueError, TypeError):
                 return None
 
@@ -90,11 +90,11 @@ class WallexProvider:
             if not mapping:
                 continue
 
-            quote_string, multiplier = mapping
+            quote_string = mapping
             for base in bases:
                 symbol_name = f"{base.value}{quote_string}"
                 if symbol_name in symbols:
-                    tasks.append(cls._fetch_otc_prices(semaphore, symbol_name, base, quote, multiplier))
+                    tasks.append(cls._fetch_otc_prices(semaphore, symbol_name, base, quote))
 
         results = await asyncio.gather(*tasks)
 
@@ -107,7 +107,7 @@ class WallexProvider:
         return result
 
     @classmethod
-    async def _fetch_single_orderbook(cls, sem: asyncio.Semaphore, mkey: str, b: Base, q: Quote, mult: int):
+    async def _fetch_single_orderbook(cls, sem: asyncio.Semaphore, mkey: str, b: Base, q: Quote):
         """Fetch a single orderbook."""
         async with sem:
             try:
@@ -122,8 +122,8 @@ class WallexProvider:
             asks_raw = ob_data.get("result", {}).get("ask", [])
             now = datetime.datetime.now(datetime.timezone.utc)
 
-            bids_list = cls._build_order_list(bids_raw, mult, q, b, now)
-            asks_list = cls._build_order_list(asks_raw, mult, q, b, now)
+            bids_list = cls._build_order_list(bids_raw, q, b, now)
+            asks_list = cls._build_order_list(asks_raw, q, b, now)
 
             return (q, b), OrderBook(asks=asks_list, bids=bids_list)
 
@@ -142,13 +142,13 @@ class WallexProvider:
             if not mapping:
                 continue
 
-            quote_string, multiplier = mapping
+            quote_string = mapping
             for base in bases:
                 market_key = f"{base.value}{quote_string}"
                 if market_key in symbols:
                     stats = symbols[market_key].get("stats", {})
                     if cls._should_fetch_orderbook(stats):
-                        tasks.append(cls._fetch_single_orderbook(sem, market_key, base, quote, multiplier))
+                        tasks.append(cls._fetch_single_orderbook(sem, market_key, base, quote))
 
         return tasks
 

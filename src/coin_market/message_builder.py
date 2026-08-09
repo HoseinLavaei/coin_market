@@ -1,20 +1,88 @@
 from decimal import Decimal
 
-from coin_market import Coins, OrderBooks
+from . import Coins, OrderBooks
+from .coin import Coin, OrderBook, Quote, Base
+from .provider_name import ProviderName
+
+
+def _get_display_keys(
+        coins: Coins,
+        books: OrderBooks,
+        provider: ProviderName | None,
+) -> list[tuple[ProviderName, Quote, Base]]:
+    """Return sorted list of (provider, quote, base) keys to display."""
+    all_keys = set(coins.coins.keys()) | set(books.books.keys())
+    if provider:
+        keys = [k for k in all_keys if k[0] == provider]
+    else:
+        keys = sorted(all_keys, key=lambda x: x[0].value)
+    return keys
+
+
+def _format_otc_section(coin: Coin | None) -> str:
+    """Format OTC section for a single provider."""
+    if coin is None:
+        return "  💰 OTC: (No data)"
+    lines = str(coin).splitlines()
+    return "  💰 OTC:\n" + "\n".join(f"  {line}" for line in lines)
+
+
+def _format_p2p_section(book: OrderBook | None, volume: Decimal) -> str:
+    """Format P2P (VWAP) section for a single provider."""
+    if book is None:
+        return "  📚 P2P: (No data)"
+    try:
+        vwap_coin = book.get_by_volume(volume)
+        lines = str(vwap_coin).splitlines()
+        return "  📚 P2P:\n" + "\n".join(f"  {line}" for line in lines)
+    except ValueError:
+        return "  📚 P2P: (No data)"
+
+
+def _format_provider_block(
+        provider_key: ProviderName,
+        quote: Quote,
+        base: Base,
+        coins: Coins,
+        books: OrderBooks,
+        show_otc: bool,
+        show_p2p: bool,
+        volume: Decimal,
+) -> str:
+    """Format a single provider block (header + OTC + P2P)."""
+    lines = [f"📦 {provider_key.value} / {base.value} / {quote.value}"]  # removed leading newline
+    if show_otc:
+        coin = coins.coins.get((provider_key, quote, base))
+        lines.append(_format_otc_section(coin))
+    if show_p2p:
+        book = books.books.get((provider_key, quote, base))
+        lines.append(_format_p2p_section(book, volume))
+    return "\n".join(lines)
 
 
 def build_prices_output(
         coins: Coins,
         books: OrderBooks,
-        type_filter: str | None,
+        provider: ProviderName | None = None,
+        type_filter: str | None = None,
         volume: Decimal | None = None,
 ) -> str:
-    lines = []
-    if type_filter == "OTC" or type_filter is None:
-        lines.append(str(coins))
-    if type_filter == "P2P" or type_filter is None:
-        if volume is not None:
-            lines.append(books.to_string(volume))
-        else:
-            lines.append(str(books))
-    return "\n\n".join(lines)
+    """
+    Build output grouped by provider, showing OTC and P2P (VWAP) side by side.
+    If provider is given, only that provider is shown.
+    """
+    show_otc = type_filter is None or type_filter == "OTC"
+    show_p2p = type_filter is None or type_filter == "P2P"
+
+    keys = _get_display_keys(coins, books, provider)
+    if not keys:
+        if provider:
+            return f"📭 No data available for provider {provider.value}."
+        return "📭 No data available."
+
+    vol = volume if volume is not None else Decimal(1)
+    blocks = [
+        _format_provider_block(p, q, b, coins, books, show_otc, show_p2p, vol)
+        for p, q, b in keys
+    ]
+    return "\n".join(blocks)

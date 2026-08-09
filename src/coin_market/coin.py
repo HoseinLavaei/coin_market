@@ -23,30 +23,9 @@ class Base(Enum):
 
 
 class Quote(Enum):
-    RLS = "RLS"
+    TMN = "TMN"
     USD = "USD"
     EUR = "EUR"
-
-    def get_symbol(self) -> str:
-        match self:
-            case self.RLS:
-                return "RIAL"
-            case self.USD:
-                return "$"
-            case self.EUR:
-                return "€"
-
-    @classmethod
-    def from_symbol(cls, data: str) -> "Quote":
-        match data:
-            case "RIAL":
-                return cls.RLS
-            case "$":
-                return cls.USD
-            case "€":
-                return cls.EUR
-            case _:
-                raise ValueError(f"Invalid currency symbol: {data}")
 
 
 class Coin(BaseModel):
@@ -74,17 +53,13 @@ class Coin(BaseModel):
         return self._sell_price / (Decimal('1') + self.sell_fee / 100)
 
     def get_formatted_price(self) -> tuple[str, str]:
-        formatted_buy = f"{self.buy_price:,}"  # adds thousands separators
-        formatted_sell = f"{self.sell_price:,}"  # adds thousands separators
-        if '.' in formatted_buy:
-            formatted_buy = formatted_buy.rstrip('0').rstrip('.')
-        if '.' in formatted_sell:
-            formatted_sell = formatted_sell.rstrip('0').rstrip('.')
+        formatted_buy = f"{int(self.buy_price):,}"
+        formatted_sell = f"{int(self.sell_price):,}"
         return formatted_buy, formatted_sell
 
     def __str__(self) -> str:
         formatted_buy, formatted_sell = self.get_formatted_price()
-        return f"{self.provider.value} {self.base.value}\n    🟢 Buy: {formatted_buy} {self.quote.get_symbol()}\n    🔴 Sell: {formatted_sell} {self.quote.get_symbol()}"
+        return f"🟢 Buy: {formatted_buy} 🔴 Sell: {formatted_sell}"
 
     def to_timezone(self) -> Coin:
         return self.model_copy(update={"timestamp": self.timestamp.astimezone(TIMEZONE)})
@@ -126,7 +101,7 @@ class Order(BaseModel):
     def __str__(self) -> str:
         # Format price with thousands separators and remove trailing zeros
         price_str, _ = self.coin.get_formatted_price()
-        return f"📊 {self.coin.base.value} @ {price_str} {self.coin.quote.get_symbol()} | 📦 Vol: {self.quantity:,.2f} {self.coin.base.value}"
+        return f"📊 {self.coin.base.value} @ {price_str} | 📦 Vol: {self.quantity:,.2f} {self.coin.base.value}"
 
     # ---------- Serialization ----------
     def to_dict(self) -> dict:
@@ -217,28 +192,13 @@ class OrderBook(BaseModel):
         return OrderBook(asks=new_asks, bids=new_bids)
 
     def to_string(self, volume: Decimal) -> str:
-        if not self.asks and not self.bids:
-            return "📭 OrderBook(empty)"
-
-        total_ask_vol = sum(order.quantity for order in self.asks)
-        total_bid_vol = sum(order.quantity for order in self.bids)
-
-        summary = (
-            f"📖 OrderBook\n"
-            f"    📈 Asks: {len(self.asks)} levels, total vol: {total_ask_vol:.4f}\n"
-            f"    📉 Bids: {len(self.bids)} levels, total vol: {total_bid_vol:.4f}"
-        )
-
+        if not self.asks or not self.bids:
+            return "📭 P2P: (No data)"
         try:
-            vwap_coin = self.get_by_volume(volume)
-            # vwap_coin.__str__ is multi-line (provider, buy, sell). Indent each line.
-            vwap_lines = str(vwap_coin).splitlines()
-            vwap_indented = "\n".join(f"    {line}" for line in vwap_lines)
-            return f"{summary}\n    📊 VWAP for {volume} base:\n{vwap_indented}"
+            coin = self.get_by_volume(volume)
+            return str(coin)
         except ValueError:
-            best_ask = self.asks[0].coin.sell_price if self.asks else None
-            best_bid = self.bids[0].coin.buy_price if self.bids else None
-            return f"{summary}\n    Best Ask: {best_ask}, Best Bid: {best_bid}"
+            return "📭 P2P: (No data)"
 
     def __str__(self) -> str:
         return self.to_string(Decimal(1))

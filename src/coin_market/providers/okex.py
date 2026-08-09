@@ -11,7 +11,7 @@ class OkexProvider:
     provider_name = ProviderName.OKEX
 
     @classmethod
-    def _parse_otc_ticker(cls, ticker: dict, base: Base, quote: Quote, multiplier: int) -> Coin | None:
+    def _parse_otc_ticker(cls, ticker: dict, base: Base, quote: Quote) -> Coin | None:
         """Parse OTC ticker and return Coin if valid, else None."""
         if ticker.get("asset") != base.value:
             return None
@@ -25,8 +25,8 @@ class OkexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
-            _buy_price=Decimal(str(buy_price)) * multiplier,
-            _sell_price=Decimal(str(sell_price)) * multiplier,
+            _buy_price=Decimal(str(buy_price)),
+            _sell_price=Decimal(str(sell_price)),
             buy_fee=Decimal(0),
             sell_fee=Decimal(0),
             quote=quote,
@@ -44,12 +44,6 @@ class OkexProvider:
 
         async def fetch_otc(quote: Quote, base: Base):
             # Map quote to OK-EX currency code
-            if quote == Quote.USD:
-                multiplier = 1
-            elif quote == Quote.RLS:
-                multiplier = 10
-            else:
-                return None
 
             url = "https://azapi.ok-ex.io/api/v1/asset/otc/tickers"
 
@@ -61,7 +55,7 @@ class OkexProvider:
 
                 # Response is a list of ticker objects
                 for ticker in data:
-                    the_coin = cls._parse_otc_ticker(ticker, base, quote, multiplier)
+                    the_coin = cls._parse_otc_ticker(ticker, base, quote)
                     if the_coin:
                         return (quote, base), the_coin
 
@@ -79,7 +73,7 @@ class OkexProvider:
         return result
 
     @classmethod
-    def _build_orders(cls, prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> \
+    def _build_orders(cls, prices_data: list, quote: Quote, base: Base, now: datetime.datetime) -> \
             list[Order]:
         """Build Order objects from price/amount pairs."""
         return [
@@ -88,8 +82,8 @@ class OkexProvider:
                     provider=cls.provider_name,
                     base=base,
                     quote=quote,
-                    _buy_price=Decimal(str(price)) * multiplier,
-                    _sell_price=Decimal(str(price)) * multiplier,
+                    _buy_price=Decimal(str(price)),
+                    _sell_price=Decimal(str(price)),
                     buy_fee=Decimal(0.1),
                     sell_fee=Decimal(0.1),
                     timestamp=now,
@@ -110,7 +104,7 @@ class OkexProvider:
 
         async def fetch_orderbook(quote: Quote, base: Base):
             # Map to OK-EX symbol format: e.g., "USDT-IRT"
-            symbol = f"{base.value}-{"IRT" if quote == Quote.RLS else str(quote.value)}"
+            symbol = f"{base.value}-{"IRT" if quote == Quote.TMN else str(quote.value)}"
             url = "https://sapi.ok-ex.io/api/v1/spot/public/books"
 
             async with semaphore:
@@ -123,11 +117,8 @@ class OkexProvider:
                 asks_raw = data.get("asks", [])  # list of [price, amount]
                 now = datetime.datetime.now(datetime.timezone.utc)
 
-                # Multiplier: 10 for RLS (IRT), 1 for USD (USDT)
-                multiplier = 10 if quote == Quote.RLS else 1
-
-                bids_list = cls._build_orders(bids_raw, multiplier, quote, base, now)
-                asks_list = cls._build_orders(asks_raw, multiplier, quote, base, now)
+                bids_list = cls._build_orders(bids_raw, quote, base, now)
+                asks_list = cls._build_orders(asks_raw, quote, base, now)
 
                 return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 

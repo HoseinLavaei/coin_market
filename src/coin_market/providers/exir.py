@@ -25,7 +25,7 @@ class ExirProvider:
         semaphore = asyncio.Semaphore(2)
         result = OrderBooks()
 
-        def build_orders(prices_data: list, multiplier: int, quote: Quote, base: Base, now: datetime.datetime) -> list[
+        def build_orders(prices_data: list, quote: Quote, base: Base, now: datetime.datetime) -> list[
             Order]:
             """Build Order objects from price/amount pairs."""
             return [
@@ -34,8 +34,8 @@ class ExirProvider:
                         provider=cls.provider_name,
                         base=base,
                         quote=quote,
-                        _buy_price=Decimal(str(price)) * multiplier,
-                        _sell_price=Decimal(str(price)) * multiplier,
+                        _buy_price=Decimal(str(price)),
+                        _sell_price=Decimal(str(price)),
                         buy_fee=Decimal('0.35'),
                         sell_fee=Decimal('0.35'),
                         timestamp=now,
@@ -47,12 +47,10 @@ class ExirProvider:
 
         async def fetch_pair(quote: Quote, base: Base):
             # Map quote to Exir's currency string and multiplier
-            if quote == Quote.RLS:
+            if quote == Quote.TMN:
                 quote_str = "irt"
-                multiplier = 10
             elif quote == Quote.USD:
                 quote_str = "usdt"
-                multiplier = 1
             else:
                 return None
 
@@ -84,8 +82,8 @@ class ExirProvider:
                         return None
 
                     now = datetime.datetime.now(datetime.timezone.utc)
-                    bids_list = build_orders(bids_raw, multiplier, quote, base, now)
-                    asks_list = build_orders(asks_raw, multiplier, quote, base, now)
+                    bids_list = build_orders(bids_raw, quote, base, now)
+                    asks_list = build_orders(asks_raw, quote, base, now)
 
                     return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
 

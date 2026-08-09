@@ -21,18 +21,16 @@ class AbanTetherProvider:
         result: Coins = Coins()
         for quote, base in pairs:
             match quote:
-                case Quote.RLS:
-                    multiplier = 10
+                case Quote.TMN:
                     data = markets[str(base.value) + "IRT"]
                 case _:
-                    multiplier = 1
                     data = markets[str(base.value) + str(quote.value)]
             coin = Coin(
                 provider=cls.provider_name,
                 base=base,
                 quote=quote,
-                _buy_price=Decimal(str(data["buy_price"])) * multiplier,
-                _sell_price=Decimal(str(data["sell_price"])) * multiplier,
+                _buy_price=Decimal(str(data["buy_price"])),
+                _sell_price=Decimal(str(data["sell_price"])),
                 timestamp=datetime.datetime.now(datetime.timezone.utc),
                 buy_fee=Decimal(0.3) if base != Base.USDT else Decimal(0),
                 sell_fee=Decimal(0.3) if base != Base.USDT else Decimal(0),

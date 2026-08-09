@@ -13,7 +13,6 @@ from .db import (
     pause_subscriptions_for_chat, resume_subscriptions_for_chat, delete_subscriptions_for_chat
 )
 from .environment import TIMEZONE, TELEGRAM_TOKEN, INTERVAL
-from .filters import filter_coins_by_provider, filter_orderbooks_by_provider
 from .message_builder import build_prices_output
 from .parsers import parse_prices_args
 from .provider_name import ProviderName
@@ -68,7 +67,7 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
         WallexProvider(),
     ]
 
-    quotes = [Quote.RLS]
+    quotes = [Quote.TMN]
     bases = [Base.USDT]
 
     coins_out = Coins()
@@ -114,15 +113,8 @@ async def send_market_data(
 
     timestamp = _cache_updated_at.strftime('%H:%M:%S')
 
-    if provider:
-        coins = filter_coins_by_provider(_cached_coins, provider)
-        books = filter_orderbooks_by_provider(_cached_orderbooks, provider)
-    else:
-        coins = _cached_coins
-        books = _cached_orderbooks
-
-    # Use the message builder to respect type_filter
-    content = build_prices_output(coins, books, type_filter, volume)
+    # No filtering here – pass the full cache and let build_prices_output handle it
+    content = build_prices_output(_cached_coins, _cached_orderbooks, provider, type_filter, volume)
 
     prefix = "🔄 Auto-update" if is_auto else "📊 Market data"
     msg = f"{prefix} ({filter_desc}, 🕒 updated at {timestamp})\n\n{content}"
