@@ -209,7 +209,7 @@ async def reload_subscriptions(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ─── Command handlers ────────────────────────────────────────
 
-async def _handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if message is None:
         return
@@ -242,7 +242,7 @@ async def _handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 
-async def _handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if message is None:
         return
@@ -313,7 +313,7 @@ async def _handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         print(f"[Broadcast] Error activating subscription: {e}")
 
 
-async def _handle_help(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_help(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if message is None:
         return
@@ -352,11 +352,11 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.args = parts[1:] if len(parts) > 1 else []
 
     if command == "prices":
-        await _handle_prices(update, context)
+        await handle_prices(update, context)
     elif command == "conf":
-        await _handle_conf(update, context)
+        await handle_conf(update, context)
     elif command == "help":
-        await _handle_help(update, context)
+        await handle_help(update, context)
 
 
 # ─── Bot startup ─────────────────────────────────────────────
