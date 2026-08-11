@@ -2,9 +2,8 @@ import asyncio
 import datetime
 from decimal import Decimal
 
-from .provider_base import get_json
-from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks, Order
-from ..provider_name import ProviderName
+from .base import get_json
+from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order, OrderBook
 
 
 class NobitexProvider:
@@ -30,8 +29,8 @@ class NobitexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
-            _buy_price=buy_price,
-            _sell_price=sell_price,
+            raw_buy_price=buy_price,
+            raw_sell_price=sell_price,
             buy_fee=Decimal(0),
             sell_fee=Decimal(0),
             quote=quote,
@@ -88,8 +87,8 @@ class NobitexProvider:
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
-                                _buy_price=Decimal(str(price)) / 10,
-                                _sell_price=Decimal(str(price)) / 10,
+                                raw_buy_price=Decimal(str(price)) / 10,
+                                raw_sell_price=Decimal(str(price)) / 10,
                                 buy_fee=Decimal(0.25),
                                 sell_fee=Decimal(0.25),
                                 timestamp=now,
@@ -105,8 +104,8 @@ class NobitexProvider:
                                 provider=cls.provider_name,
                                 base=base,
                                 quote=quote,
-                                _buy_price=Decimal(str(price)) / 10,
-                                _sell_price=Decimal(str(price)) / 10,
+                                raw_buy_price=Decimal(str(price)) / 10,
+                                raw_sell_price=Decimal(str(price)) / 10,
                                 buy_fee=Decimal(0.25),
                                 sell_fee=Decimal(0.25),
                                 timestamp=now,

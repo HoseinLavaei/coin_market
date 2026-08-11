@@ -11,3 +11,14 @@ class ProviderName(Enum):
     TABDEAL = "TABDEAL"
     OMPFINEX = "OMPFINEX"
     OKEX = "OKEX"
+
+
+class Base(Enum):
+    USDT = "USDT"
+    BTC = "BTC"
+
+
+class Quote(Enum):
+    TMN = "TMN"
+    USD = "USD"
+    EUR = "EUR"

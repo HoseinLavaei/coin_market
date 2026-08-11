@@ -2,9 +2,8 @@ import asyncio
 import datetime
 from decimal import Decimal
 
-from .provider_base import get_json
-from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks, Order
-from ..provider_name import ProviderName
+from .base import get_json
+from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order, OrderBook
 
 
 class WallexProvider:
@@ -30,8 +29,8 @@ class WallexProvider:
                     provider=cls.provider_name,
                     base=b,
                     quote=q,
-                    _buy_price=Decimal(str(e[key])),
-                    _sell_price=Decimal(str(e[key])),
+                    raw_buy_price=Decimal(str(e[key])),
+                    raw_sell_price=Decimal(str(e[key])),
                     buy_fee=Decimal(0.3),
                     sell_fee=Decimal(0.3),
                     timestamp=now,
@@ -64,8 +63,8 @@ class WallexProvider:
             price_coin = Coin(
                 provider=cls.provider_name,
                 base=b,
-                _buy_price=buy_price,
-                _sell_price=sell_price,
+                raw_buy_price=buy_price,
+                raw_sell_price=sell_price,
                 buy_fee=Decimal(0),
                 sell_fee=Decimal(0),
                 quote=q,

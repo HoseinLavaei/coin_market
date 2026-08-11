@@ -4,12 +4,10 @@ from typing import cast
 
 from sqlalchemy import select, update, delete, and_
 
-from .db import AsyncSessionLocal, PendingSubscription
-from .environment import TIMEZONE
-from .subscription import Subscription
+from ..database import AsyncSessionLocal
+from ..models import Subscription, PendingSubscription
+from ...environment import TIMEZONE
 
-
-# ─── Subscription helpers ──────────────────────────────────
 
 async def add_subscription(
         chat_id: int,
@@ -37,9 +35,7 @@ async def add_subscription(
 
 async def get_subscriptions_for_user(user_id: int) -> list[Subscription]:
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Subscription).where(Subscription.user_id == user_id)
-        )
+        result = await session.execute(select(Subscription).where(Subscription.user_id == user_id))
         return list(result.scalars().all())
 
 
@@ -47,10 +43,7 @@ async def get_active_subscriptions() -> list[Subscription]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Subscription).where(
-                and_(
-                    Subscription.status == "active",
-                    Subscription.repeat_interval.is_not(None)
-                )
+                and_(Subscription.status == "active", Subscription.repeat_interval.is_not(None))
             )
         )
         return list(result.scalars().all())
@@ -64,7 +57,6 @@ async def pause_subscription_by_id(sub_id: int, user_id: int) -> int:
             .values(status="paused", updated_at=datetime.now())
         )
         await session.commit()
-        # noinspection PyUnresolvedReferences
         return result.rowcount
 
 
@@ -76,22 +68,17 @@ async def resume_subscription_by_id(sub_id: int, user_id: int) -> int:
             .values(status="active", updated_at=datetime.now())
         )
         await session.commit()
-        # noinspection PyUnresolvedReferences
         return result.rowcount
 
 
 async def delete_subscription_by_id(sub_id: int, user_id: int) -> int:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            delete(Subscription)
-            .where(and_(Subscription.id == sub_id, Subscription.user_id == user_id))
+            delete(Subscription).where(and_(Subscription.id == sub_id, Subscription.user_id == user_id))
         )
         await session.commit()
-        # noinspection PyUnresolvedReferences
         return result.rowcount
 
-
-# ─── Pending subscription helpers ──────────────────────────
 
 async def create_pending_subscription(
         key: str,
@@ -122,27 +109,20 @@ async def create_pending_subscription(
 async def claim_pending_subscription(key: str, chat_id: int) -> dict | None:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(PendingSubscription)
-            .where(PendingSubscription.key == key)
-            .with_for_update()
-        )
+            select(PendingSubscription).where(PendingSubscription.key == key).with_for_update())
         pending = result.scalar_one_or_none()
         if pending is None:
             return None
-
         pending = cast(PendingSubscription, pending)
-
         if pending.status != "pending":
             return None
         if pending.expires_at < datetime.now(TIMEZONE):
             pending.status = "expired"
             await session.commit()
             return None
-
         pending.chat_id = chat_id
         pending.status = "claimed"
         await session.commit()
-
         return {
             "user_id": pending.user_id,
             "provider": pending.provider,
@@ -155,7 +135,5 @@ async def claim_pending_subscription(key: str, chat_id: int) -> dict | None:
 
 async def delete_pending_subscription(key: str) -> None:
     async with AsyncSessionLocal() as session:
-        await session.execute(
-            delete(PendingSubscription).where(PendingSubscription.key == key)
-        )
+        await session.execute(delete(PendingSubscription).where(PendingSubscription.key == key))
         await session.commit()

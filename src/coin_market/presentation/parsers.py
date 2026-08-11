@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import cast
 
-from .provider_name import ProviderName
+from ..domain import ProviderName
 
 
 def _handle_dash_arg(i: int, args: list[str]) -> tuple[str, str | None, int] | None:

@@ -2,9 +2,8 @@ import asyncio
 import datetime
 from decimal import Decimal
 
-from .provider_base import get_json
-from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks, Order
-from ..provider_name import ProviderName
+from .base import get_json
+from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order, OrderBook
 
 
 class ExirProvider:
@@ -34,8 +33,8 @@ class ExirProvider:
                         provider=cls.provider_name,
                         base=base,
                         quote=quote,
-                        _buy_price=Decimal(str(price)),
-                        _sell_price=Decimal(str(price)),
+                        raw_buy_price=Decimal(str(price)),
+                        raw_sell_price=Decimal(str(price)),
                         buy_fee=Decimal('0.35'),
                         sell_fee=Decimal('0.35'),
                         timestamp=now,

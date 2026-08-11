@@ -7,11 +7,12 @@ from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from .environment import CONTROL_BOT_TOKEN, KEY_EXPIRY_SECONDS, TIMEZONE
+from ..services.subscription_scheduler import remove_subscription_job, reload_subscriptions_immediate
+from .constants import USAGE_MESSAGE
 from .parsers import parse_prices_args
-from .provider_name import ProviderName
-from .subscription import build_subscription_description
-from .subscription_repository import (
+from ..domain import build_subscription_description
+from ..environment import CONTROL_BOT_TOKEN, KEY_EXPIRY_SECONDS, TIMEZONE
+from ..infrastructure.repositories import (
     create_pending_subscription,
     get_subscriptions_for_user,
     pause_subscription_by_id,
@@ -19,50 +20,28 @@ from .subscription_repository import (
     delete_subscription_by_id,
 )
 
-USAGE_MESSAGE = (
-        "📖 Usage:\n"
-        "/prices [options]\n"
-        "        --provider NAME   | provider=NAME   (filter by provider)\n"
-        "        --type otc|p2p    | type=otc|p2p    (show only OTC or P2P)\n"
-        "        --volume NUM      | volume=NUM      (volume for VWAP calculation)\n"
-        "        --repeat SEC      | repeat=SEC      (start auto-updates every SEC seconds)\n"
-        "/list                            (list your subscriptions)\n"
-        "/stop <id>                       (pause subscription by ID)\n"
-        "/resume <id>                     (resume subscription by ID)\n"
-        "/delete <id>                     (delete subscription by ID)\n"
-        "/help                            (show this message)\n\n"
-        "Valid providers: " + ", ".join([p.value for p in ProviderName])
-)
-
 
 async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if message is None:
         return
-
     user = update.effective_user
     if user is None:
         await message.reply_text("❌ Could not determine user. Please try again.")
         return
-
     user_id = user.id
     args = context.args or []
-
     try:
         provider, type_filter, volume, repeat_interval, stop_flag = parse_prices_args(args)
     except ValueError as e:
         await message.reply_text(f"❌ Error parsing filters: {e}\n\n{USAGE_MESSAGE}")
         return
-
     if repeat_interval is None:
         await message.reply_text(
-            "ℹ️ One-time /prices requests are not supported. Use --repeat to create a subscription."
-        )
+            "ℹ️ One-time /prices requests are not supported. Use --repeat to create a subscription.")
         return
-
     key = secrets.token_hex(4).upper()
     expires_at = datetime.now(TIMEZONE) + timedelta(seconds=KEY_EXPIRY_SECONDS)
-
     try:
         await create_pending_subscription(
             key=key,
@@ -73,14 +52,12 @@ async def prices_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             repeat_interval=repeat_interval,
             expires_at=expires_at,
         )
-
         filter_desc = build_subscription_description(
             provider.value if provider else None,
             type_filter,
             volume,
             None,
         )
-
         await message.reply_text(
             f"✅ Subscription request created!\n\n"
             f"Filters: {filter_desc}\n"
@@ -97,18 +74,15 @@ async def list_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> N
     message = update.effective_message
     if message is None:
         return
-
     user = update.effective_user
     if user is None:
         await message.reply_text("❌ Could not determine user. Please try again.")
         return
-
     user_id = user.id
     subs = await get_subscriptions_for_user(user_id)
     if not subs:
         await message.reply_text("📭 You have no subscriptions.")
         return
-
     lines = ["📋 Your subscriptions:"]
     for sub in subs:
         status_emoji = "✅" if sub.status == "active" else "⏸️"
@@ -119,7 +93,6 @@ async def list_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> N
             sub.repeat_interval,
         )
         lines.append(f"  {status_emoji} #{sub.id}: {desc} (status: {sub.status})")
-
     msg = "\n".join(lines)
     if len(msg) > 4096:
         for i in range(0, len(msg), 4096):
@@ -132,12 +105,10 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     message = update.effective_message
     if message is None:
         return
-
     user = update.effective_user
     if user is None:
         await message.reply_text("❌ Could not determine user. Please try again.")
         return
-
     user_id = user.id
     args = context.args or []
     if not args:
@@ -150,6 +121,8 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     count = await pause_subscription_by_id(sub_id, user_id)
     if count:
+        remove_subscription_job(sub_id)
+        await reload_subscriptions_immediate()
         await message.reply_text(f"⏸️ Paused subscription #{sub_id}.")
     else:
         await message.reply_text(f"❌ Subscription #{sub_id} not found or not yours.")
@@ -159,12 +132,10 @@ async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     message = update.effective_message
     if message is None:
         return
-
     user = update.effective_user
     if user is None:
         await message.reply_text("❌ Could not determine user. Please try again.")
         return
-
     user_id = user.id
     args = context.args or []
     if not args:
@@ -177,6 +148,7 @@ async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     count = await resume_subscription_by_id(sub_id, user_id)
     if count:
+        await reload_subscriptions_immediate()
         await message.reply_text(f"▶️ Resumed subscription #{sub_id}.")
     else:
         await message.reply_text(f"❌ Subscription #{sub_id} not found, not paused, or not yours.")
@@ -186,12 +158,10 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     message = update.effective_message
     if message is None:
         return
-
     user = update.effective_user
     if user is None:
         await message.reply_text("❌ Could not determine user. Please try again.")
         return
-
     user_id = user.id
     args = context.args or []
     if not args:
@@ -226,27 +196,20 @@ async def run_control_bot():
     if not CONTROL_BOT_TOKEN:
         print("Error: CONTROL_BOT_TOKEN environment variable not set.")
         sys.exit(1)
-
     app = ApplicationBuilder().token(CONTROL_BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("prices", prices_command))
     app.add_handler(CommandHandler("list", list_command))
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("resume", resume_command))
     app.add_handler(CommandHandler("delete", delete_command))
     app.add_handler(CommandHandler("help", help_command))
-
     print("Control bot started.")
-
     await app.initialize()
     await app.start()
-
     if app.updater is None:
         print("Error: Updater is not available.")
         sys.exit(1)
-
     await app.updater.start_polling()
-
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -256,9 +219,7 @@ async def run_control_bot():
 
     loop.add_signal_handler(signal.SIGINT, signal_handler)
     loop.add_signal_handler(signal.SIGTERM, signal_handler)
-
     await shutdown_event.wait()
-
     print("EXITING control bot...")
     if app.updater:
         await app.updater.stop()

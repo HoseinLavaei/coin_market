@@ -2,9 +2,8 @@ import asyncio
 import datetime
 from decimal import Decimal
 
-from .provider_base import get_json
-from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks, Order
-from ..provider_name import ProviderName
+from .base import get_json
+from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order, OrderBook
 
 
 class OkexProvider:
@@ -25,8 +24,8 @@ class OkexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
-            _buy_price=Decimal(str(buy_price)),
-            _sell_price=Decimal(str(sell_price)),
+            raw_buy_price=Decimal(str(buy_price)),
+            raw_sell_price=Decimal(str(sell_price)),
             buy_fee=Decimal(0),
             sell_fee=Decimal(0),
             quote=quote,
@@ -82,8 +81,8 @@ class OkexProvider:
                     provider=cls.provider_name,
                     base=base,
                     quote=quote,
-                    _buy_price=Decimal(str(price)),
-                    _sell_price=Decimal(str(price)),
+                    raw_buy_price=Decimal(str(price)),
+                    raw_sell_price=Decimal(str(price)),
                     buy_fee=Decimal(0.1),
                     sell_fee=Decimal(0.1),
                     timestamp=now,

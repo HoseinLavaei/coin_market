@@ -1,9 +1,8 @@
 import datetime
 from decimal import Decimal
 
-from .provider_base import get_json
-from ..coin import Coin, Quote, Base, Coins, OrderBooks
-from ..provider_name import ProviderName
+from .base import get_json
+from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName
 
 
 class AbanTetherProvider:
@@ -29,8 +28,8 @@ class AbanTetherProvider:
                 provider=cls.provider_name,
                 base=base,
                 quote=quote,
-                _buy_price=Decimal(str(data["buy_price"])),
-                _sell_price=Decimal(str(data["sell_price"])),
+                raw_buy_price=Decimal(str(data["buy_price"])),
+                raw_sell_price=Decimal(str(data["sell_price"])),
                 timestamp=datetime.datetime.now(datetime.timezone.utc),
                 buy_fee=Decimal(0.3) if base != Base.USDT else Decimal(0),
                 sell_fee=Decimal(0.3) if base != Base.USDT else Decimal(0),

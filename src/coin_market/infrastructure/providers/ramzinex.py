@@ -2,9 +2,8 @@ import asyncio
 import datetime
 from decimal import Decimal
 
-from .provider_base import get_json
-from ..coin import Quote, Coin, Base, OrderBook, Coins, OrderBooks, Order
-from ..provider_name import ProviderName
+from .base import get_json
+from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order, OrderBook
 
 
 class RamzinexProvider:
@@ -59,8 +58,8 @@ class RamzinexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
-            _buy_price=Decimal(str(buy_price)) / 10,
-            _sell_price=Decimal(str(sell_price)) / 10,
+            raw_buy_price=Decimal(str(buy_price)) / 10,
+            raw_sell_price=Decimal(str(sell_price)) / 10,
             buy_fee=Decimal(0),
             sell_fee=Decimal(0),
             quote=quote,
@@ -103,8 +102,8 @@ class RamzinexProvider:
                 provider=cls.provider_name,
                 base=b,
                 quote=q,
-                _buy_price=price,
-                _sell_price=price,
+                raw_buy_price=price,
+                raw_sell_price=price,
                 buy_fee=Decimal(0.25),
                 sell_fee=Decimal(0.25),
                 timestamp=now,

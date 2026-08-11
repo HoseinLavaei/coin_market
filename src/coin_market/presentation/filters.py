@@ -1,5 +1,4 @@
-from . import Coins, OrderBooks
-from .provider_name import ProviderName
+from ..domain import Coins, OrderBooks, ProviderName
 
 
 def filter_coins_by_provider(coins: Coins, provider: ProviderName) -> Coins:

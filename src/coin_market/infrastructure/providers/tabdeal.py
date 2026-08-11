@@ -2,9 +2,8 @@ import asyncio
 import datetime
 from decimal import Decimal
 
-from .provider_base import get_json
-from ..coin import Coin, Quote, Base, OrderBook, Coins, OrderBooks, Order
-from ..provider_name import ProviderName
+from .base import get_json
+from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order, OrderBook
 
 
 class TabdealProvider:
@@ -48,8 +47,8 @@ class TabdealProvider:
                     provider=cls.provider_name,
                     base=_base,
                     quote=_quote,
-                    _buy_price=raw_buy_price,
-                    _sell_price=raw_sell_price,
+                    raw_buy_price=raw_buy_price,
+                    raw_sell_price=raw_sell_price,
                     buy_fee=Decimal('0'),
                     sell_fee=Decimal('0'),
                     timestamp=datetime.datetime.now(datetime.timezone.utc),
@@ -92,8 +91,8 @@ class TabdealProvider:
                 provider=cls.provider_name,
                 base=b,
                 quote=q,
-                _buy_price=price,
-                _sell_price=price,
+                raw_buy_price=price,
+                raw_sell_price=price,
                 buy_fee=Decimal('0.35'),
                 sell_fee=Decimal('0.35'),
                 timestamp=now,
