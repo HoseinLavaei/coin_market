@@ -9,11 +9,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, Job, JobQueue
 
 from . import Quote, Coins, Base, OrderBooks
-from .db import (
-    init_db, load_latest_snapshot, save_snapshot, close_db,
-    get_active_subscriptions, claim_pending_subscription,
-    add_subscription, delete_pending_subscription
-)
+from .db import init_db, close_db
 from .environment import TIMEZONE, BROADCAST_BOT_TOKEN, INTERVAL
 from .message_builder import build_prices_output
 from .parsers import parse_prices_args
@@ -27,7 +23,12 @@ from .providers.ompfinex import OmpfinexProvider
 from .providers.ramzinex import RamzinexProvider
 from .providers.tabdeal import TabdealProvider
 from .providers.wallex import WallexProvider
+from .snapshot_repository import load_latest_snapshot, save_snapshot
 from .subscription import build_subscription_description
+from .subscription_repository import (
+    get_active_subscriptions, claim_pending_subscription,
+    add_subscription, delete_pending_subscription
+)
 
 # ─── Global cache ─────────────────────────────────────────────
 _cached_coins: Coins = Coins()
@@ -222,11 +223,13 @@ async def _handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         provider, type_filter, volume, repeat_interval, stop_flag = parse_prices_args(args)
     except ValueError as e:
-        await message.reply_text(f"❌ Error parsing filters: {e}\n\nUsage: /prices [--provider NAME] [--type otc|p2p] [--volume NUM]")
+        await message.reply_text(
+            f"❌ Error parsing filters: {e}\n\nUsage: /prices [--provider NAME] [--type otc|p2p] [--volume NUM]")
         return
 
     if repeat_interval is not None:
-        await message.reply_text("ℹ️ --repeat is ignored for one-time /prices request. Use the control bot for subscriptions.")
+        await message.reply_text(
+            "ℹ️ --repeat is ignored for one-time /prices request. Use the control bot for subscriptions.")
 
     chat_id = effective_chat.id
     await send_market_data(
@@ -374,20 +377,14 @@ async def run_broadcast_bot():
             _cached_coins, _cached_orderbooks = snapshot
             _cache_updated_at = datetime.now(TIMEZONE)
             timestamp = _cache_updated_at.strftime('%H:%M:%S')
-            print(f"[{timestamp}] Loaded {len(_cached_coins.coins)} coins and {len(_cached_orderbooks.books)} orderbooks from DB.")
+            print(
+                f"[{timestamp}] Loaded {len(_cached_coins.coins)} coins and {len(_cached_orderbooks.books)} orderbooks from DB.")
         else:
             print("No previous data in database. Will fetch on first update.")
     except Exception as e:
         print(f"Warning: Could not load snapshot: {e}")
 
     app = ApplicationBuilder().token(BROADCAST_BOT_TOKEN).build()
-
-    # Delete any existing webhook to ensure polling works
-    try:
-        await app.bot.delete_webhook()
-        print("Webhook deleted (if any).")
-    except Exception as e:
-        print(f"Error deleting webhook: {e}")
 
     # Use filters.COMMAND to only catch messages that start with '/'
     app.add_handler(MessageHandler(filters.COMMAND, handle_command))
@@ -401,7 +398,7 @@ async def run_broadcast_bot():
     dummy_context = type('DummyContext', (), {'job_queue': job_queue, 'bot': None})()
 
     # Initial cache update and subscription load
-    await update_cache(dummy_context)   # type: ignore[arg-type]
+    await update_cache(dummy_context)  # type: ignore[arg-type]
 
     # Schedule periodic cache updates
     job_queue.run_repeating(update_cache, interval=INTERVAL)

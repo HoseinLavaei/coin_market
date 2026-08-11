@@ -7,31 +7,31 @@ from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from .db import (
+from .environment import CONTROL_BOT_TOKEN, KEY_EXPIRY_SECONDS, TIMEZONE
+from .parsers import parse_prices_args
+from .provider_name import ProviderName
+from .subscription import build_subscription_description
+from .subscription_repository import (
     create_pending_subscription,
     get_subscriptions_for_user,
     pause_subscription_by_id,
     resume_subscription_by_id,
     delete_subscription_by_id,
 )
-from .environment import CONTROL_BOT_TOKEN, KEY_EXPIRY_SECONDS, TIMEZONE
-from .parsers import parse_prices_args
-from .provider_name import ProviderName
-from .subscription import build_subscription_description
 
 USAGE_MESSAGE = (
-    "📖 Usage:\n"
-    "/prices [options]\n"
-    "        --provider NAME   | provider=NAME   (filter by provider)\n"
-    "        --type otc|p2p    | type=otc|p2p    (show only OTC or P2P)\n"
-    "        --volume NUM      | volume=NUM      (volume for VWAP calculation)\n"
-    "        --repeat SEC      | repeat=SEC      (start auto-updates every SEC seconds)\n"
-    "/list                            (list your subscriptions)\n"
-    "/stop <id>                       (pause subscription by ID)\n"
-    "/resume <id>                     (resume subscription by ID)\n"
-    "/delete <id>                     (delete subscription by ID)\n"
-    "/help                            (show this message)\n\n"
-    "Valid providers: " + ", ".join([p.value for p in ProviderName])
+        "📖 Usage:\n"
+        "/prices [options]\n"
+        "        --provider NAME   | provider=NAME   (filter by provider)\n"
+        "        --type otc|p2p    | type=otc|p2p    (show only OTC or P2P)\n"
+        "        --volume NUM      | volume=NUM      (volume for VWAP calculation)\n"
+        "        --repeat SEC      | repeat=SEC      (start auto-updates every SEC seconds)\n"
+        "/list                            (list your subscriptions)\n"
+        "/stop <id>                       (pause subscription by ID)\n"
+        "/resume <id>                     (resume subscription by ID)\n"
+        "/delete <id>                     (delete subscription by ID)\n"
+        "/help                            (show this message)\n\n"
+        "Valid providers: " + ", ".join([p.value for p in ProviderName])
 )
 
 
@@ -123,7 +123,7 @@ async def list_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> N
     msg = "\n".join(lines)
     if len(msg) > 4096:
         for i in range(0, len(msg), 4096):
-            await message.reply_text(msg[i:i+4096])
+            await message.reply_text(msg[i:i + 4096])
     else:
         await message.reply_text(msg)
 
