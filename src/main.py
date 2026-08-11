@@ -1,16 +1,21 @@
 import asyncio
+import sys
 
-from dotenv import load_dotenv
-
-from coin_market.bot import run_bot
-
-# Load environment variables from .env file
-load_dotenv()
+from coin_market.broadcast_bot import run_broadcast_bot
+from coin_market.control_bot import run_control_bot
 
 
-def main():
-    asyncio.run(run_bot())
-
+async def main():
+    # Run both bots concurrently
+    await asyncio.gather(
+        run_broadcast_bot(),
+        run_control_bot(),
+        return_exceptions=True
+    )
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Shutting down...")
+        sys.exit(0)

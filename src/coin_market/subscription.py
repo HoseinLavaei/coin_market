@@ -36,9 +36,10 @@ class Subscription(Base):
 
     id: Mapped[int] = mapped_column(sa.Integer, primary_key=True, autoincrement=True)
     chat_id: Mapped[int] = mapped_column(sa.BigInteger, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(sa.BigInteger, nullable=False, index=True)
     provider: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     type_filter: Mapped[str | None] = mapped_column(sa.String, nullable=True)
-    volume: Mapped[Decimal | None] = mapped_column(sa.DECIMAL, nullable=True)  # DECIMAL
+    volume: Mapped[Decimal | None] = mapped_column(sa.DECIMAL, nullable=True)
     repeat_interval: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     status: Mapped[str] = mapped_column(sa.String, default="active")
 
