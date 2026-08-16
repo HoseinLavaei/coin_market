@@ -1,3 +1,8 @@
+"""
+Aggregates data from all exchange providers.
+Fetches OTC prices and order books concurrently and returns unified collections.
+"""
+
 import asyncio
 
 from ..domain import Quote, Base, Coins, OrderBooks
@@ -8,6 +13,10 @@ from ..infrastructure.providers import (
 
 
 async def fetch_all() -> tuple[Coins, OrderBooks]:
+    """
+    Fetch OTC and order book data from all supported providers.
+    Returns a tuple of (Coins, OrderBooks) with timezone‑adjusted timestamps.
+    """
     providers = [
         AbanTetherProvider(),
         BitpinProvider(),
@@ -25,7 +34,7 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
     coins_out = Coins()
     books_out = OrderBooks()
 
-    # OTC
+    # Fetch OTC prices
     tasks = [p.get_otc(quotes, bases) for p in providers]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:
@@ -34,7 +43,7 @@ async def fetch_all() -> tuple[Coins, OrderBooks]:
             for coin in r.coins.values():
                 coins_out.upsert(coin)
 
-    # Order books
+    # Fetch order books
     tasks = [p.get_orderbook(quotes, bases) for p in providers]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:

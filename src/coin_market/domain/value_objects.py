@@ -2,6 +2,7 @@ from decimal import Decimal
 
 
 def indent_text(text: str, spaces: int = 4) -> str:
+    """Indent every line of a multi‑line string by the given number of spaces."""
     if not text:
         return text
     indent = " " * spaces
@@ -14,6 +15,10 @@ def build_subscription_description(
         volume: Decimal | None,
         repeat_interval: int | None,
 ) -> str:
+    """
+    Build a human‑readable description of a subscription's filters.
+    Used in messages to users and in logs.
+    """
     parts = []
     if provider:
         parts.append(f"🏛️ provider={provider}")
@@ -28,4 +33,5 @@ def build_subscription_description(
         parts.append(f"📦 volume={volume}")
     if repeat_interval is not None:
         parts.append(f"⏱️ repeat={repeat_interval}s")
+
     return " + ".join(parts) if parts else "📊 all data"

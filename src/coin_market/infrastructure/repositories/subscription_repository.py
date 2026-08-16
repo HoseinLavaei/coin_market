@@ -1,3 +1,8 @@
+"""
+Repository for managing Subscriptions and PendingSubscriptions in the database.
+Uses SQLAlchemy async sessions and handles the two‑step activation flow.
+"""
+
 from datetime import datetime
 from decimal import Decimal
 from typing import cast
@@ -17,6 +22,7 @@ async def add_subscription(
         volume: Decimal | None = None,
         repeat_interval: int | None = None,
 ) -> Subscription:
+    """Create a new active subscription for a chat."""
     async with AsyncSessionLocal() as session:
         sub = Subscription(
             chat_id=chat_id,
@@ -34,12 +40,14 @@ async def add_subscription(
 
 
 async def get_subscriptions_for_user(user_id: int) -> list[Subscription]:
+    """Return all subscriptions (any status) belonging to a user."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Subscription).where(Subscription.user_id == user_id))
         return list(result.scalars().all())
 
 
 async def get_active_subscriptions() -> list[Subscription]:
+    """Return all active subscriptions that have a repeat_interval set."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Subscription).where(
@@ -50,6 +58,7 @@ async def get_active_subscriptions() -> list[Subscription]:
 
 
 async def pause_subscription_by_id(sub_id: int, user_id: int) -> int:
+    """Pause a subscription (set status to 'paused'). Returns number of affected rows."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             update(Subscription)
@@ -61,6 +70,10 @@ async def pause_subscription_by_id(sub_id: int, user_id: int) -> int:
 
 
 async def resume_subscription_by_id(sub_id: int, user_id: int) -> int:
+    """
+    Resume a paused subscription (set status to 'active').
+    Returns number of affected rows.
+    """
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             update(Subscription)
@@ -72,6 +85,7 @@ async def resume_subscription_by_id(sub_id: int, user_id: int) -> int:
 
 
 async def delete_subscription_by_id(sub_id: int, user_id: int) -> int:
+    """Permanently delete a subscription. Returns number of affected rows."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             delete(Subscription).where(and_(Subscription.id == sub_id, Subscription.user_id == user_id))
@@ -89,6 +103,7 @@ async def create_pending_subscription(
         repeat_interval: int | None,
         expires_at: datetime,
 ) -> PendingSubscription:
+    """Create a pending subscription with a one‑time activation key."""
     async with AsyncSessionLocal() as session:
         pending = PendingSubscription(
             key=key,
@@ -107,9 +122,14 @@ async def create_pending_subscription(
 
 
 async def claim_pending_subscription(key: str, chat_id: int) -> dict | None:
+    """
+    Claim a pending subscription by key. Validates that it is still pending and not expired.
+    On success, marks it as claimed and returns the data needed to create a real subscription.
+    """
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(PendingSubscription).where(PendingSubscription.key == key).with_for_update())
+            select(PendingSubscription).where(PendingSubscription.key == key).with_for_update()
+        )
         pending = result.scalar_one_or_none()
         if pending is None:
             return None
@@ -134,6 +154,7 @@ async def claim_pending_subscription(key: str, chat_id: int) -> dict | None:
 
 
 async def delete_pending_subscription(key: str) -> None:
+    """Delete a pending subscription (used after successful activation)."""
     async with AsyncSessionLocal() as session:
         await session.execute(delete(PendingSubscription).where(PendingSubscription.key == key))
         await session.commit()

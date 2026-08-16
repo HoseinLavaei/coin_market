@@ -7,6 +7,7 @@ from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order,
 
 
 class NobitexProvider:
+    """Fetches OTC and order book data from Nobitex exchange."""
     provider_name = ProviderName.NOBITEX
 
     @classmethod
@@ -29,33 +30,34 @@ class NobitexProvider:
         return Coin(
             provider=cls.provider_name,
             base=base,
+            quote=quote,
             raw_buy_price=buy_price,
             raw_sell_price=sell_price,
             buy_fee=Decimal(0),
             sell_fee=Decimal(0),
-            quote=quote,
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
 
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
         result = Coins()
+
         for quote in quotes:
             currency_string = "rls" if quote == Quote.TMN else "usdt"
             params = {
                 "srcCurrency": ",".join(str(b.value).lower() for b in bases),
                 "dstCurrency": currency_string,
             }
+
             try:
-                json_data = await get_json("https://apiv2.nobitex.ir/market/stats", params)
+                data = await get_json("https://apiv2.nobitex.ir/market/stats", params)
             except (OSError, ValueError, TimeoutError):
                 continue
 
-            if json_data.get("status") != "ok":
+            if data.get("status") != "ok":
                 continue
 
-            stats = json_data.get("stats", {})
-            for market_key, market_data in stats.items():
+            for market_key, market_data in data.get("stats", {}).items():
                 coin = cls._parse_market_data(market_key, market_data, bases, quote)
                 if coin:
                     result.upsert(coin)
@@ -70,10 +72,10 @@ class NobitexProvider:
         async def fetch_pair(quote: Quote, base: Base):
             quote_str = "IRT" if quote == Quote.TMN else "USDT"
             pair = f"{base.value}{quote_str}"
+
             async with semaphore:
                 try:
-                    url = f"https://apiv2.nobitex.ir/v3/orderbook/{pair}"
-                    data = await get_json(url)
+                    data = await get_json(f"https://apiv2.nobitex.ir/v3/orderbook/{pair}")
                     if data.get("status") != "ok":
                         return None
 
@@ -81,50 +83,39 @@ class NobitexProvider:
                     asks_raw = data.get("asks", [])
                     now = datetime.datetime.now(datetime.timezone.utc)
 
-                    bids_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                raw_buy_price=Decimal(str(price)) / 10,
-                                raw_sell_price=Decimal(str(price)) / 10,
-                                buy_fee=Decimal(0.25),
-                                sell_fee=Decimal(0.25),
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
-                        )
-                        for price, amount in bids_raw
-                    ]
+                    def build_orders(raw) -> list[Order]:
+                        return [
+                            Order(
+                                coin=Coin(
+                                    provider=cls.provider_name,
+                                    base=base,
+                                    quote=quote,
+                                    raw_buy_price=Decimal(str(price)) / 10,
+                                    raw_sell_price=Decimal(str(price)) / 10,
+                                    buy_fee=Decimal(0.25),
+                                    sell_fee=Decimal(0.25),
+                                    timestamp=now,
+                                ),
+                                quantity=Decimal(str(amount)),
+                            )
+                            for price, amount in raw
+                        ]
 
-                    asks_list = [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                raw_buy_price=Decimal(str(price)) / 10,
-                                raw_sell_price=Decimal(str(price)) / 10,
-                                buy_fee=Decimal(0.25),
-                                sell_fee=Decimal(0.25),
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
-                        )
-                        for price, amount in asks_raw
-                    ]
-
-                    return (quote, base), OrderBook(asks=asks_list, bids=bids_list)
+                    return (quote, base), OrderBook(
+                        asks=build_orders(asks_raw),
+                        bids=build_orders(bids_raw),
+                    )
 
                 except Exception as e:
-                    print(f"Cant get nobitex's Orderbook:{e}")
+                    print(f"Nobitex orderbook fetch failed: {e}")
                     return None
 
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)
+
         for r in results:
             if r is not None:
                 _, orderbook = r
                 result.upsert(orderbook)
+
         return result

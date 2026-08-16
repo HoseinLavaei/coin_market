@@ -1,3 +1,8 @@
+"""
+Broadcast bot – handles one‑time price requests, subscription activation via key,
+and runs the main polling loop. It also stores the bot instance for immediate updates.
+"""
+
 import asyncio
 import signal
 import sys
@@ -15,12 +20,17 @@ from ..services import (
     schedule_subscription_job,
     send_market_data,
     set_job_queue,
+    set_broadcast_bot,
 )
 
 
 # ─── Command Handlers ──────────────────────────────────────
 
 async def handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Show a one‑time market snapshot. Optionally filters by provider, type, volume, or chat_id.
+    If --chat_id is provided, send the snapshot to that chat instead of the current one.
+    """
     message = update.effective_message
     if message is None:
         return
@@ -30,17 +40,19 @@ async def handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     args = context.args or []
     try:
-        provider, type_filter, volume, repeat_interval, stop_flag = parse_prices_args(args)
+        provider, type_filter, volume, repeat_interval, stop_flag, chat_id = parse_prices_args(args)
     except ValueError as e:
         await message.reply_text(
-            f"❌ Error parsing filters: {e}\n\nUsage: /prices [--provider NAME] [--type otc|p2p] [--volume NUM]")
+            f"❌ Error parsing filters: {e}\n\nUsage: /prices [--provider NAME] [--type otc|p2p] [--volume NUM] [--chat_id CHAT_ID]"
+        )
         return
     if repeat_interval is not None:
         await message.reply_text(
-            "ℹ️ --repeat is ignored for one-time /prices request. Use the control bot for subscriptions.")
-    chat_id = effective_chat.id
+            "ℹ️ --repeat is ignored for one-time /prices request. Use the control bot for subscriptions."
+        )
+    target_chat_id = chat_id if chat_id is not None else effective_chat.id
     await send_market_data(
-        chat_id=chat_id,
+        chat_id=target_chat_id,
         context=context,
         provider=provider,
         type_filter=type_filter,
@@ -50,6 +62,10 @@ async def handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Activate a pending subscription using a one‑time key.
+    The key must have been created by the control bot.
+    """
     message = update.effective_message
     if message is None:
         return
@@ -84,7 +100,6 @@ async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await message.reply_text("❌ Job queue not available.")
             return
         schedule_subscription_job(job_queue, sub)
-        # store job globally if needed (we can rely on the scheduler's internal dict)
         provider = ProviderName[sub.provider.upper()] if sub.provider else None
         await send_market_data(
             chat_id=sub.chat_id,
@@ -112,6 +127,7 @@ async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def handle_help(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the help message for the broadcast bot."""
     message = update.effective_message
     if message is None:
         return
@@ -127,6 +143,7 @@ async def handle_help(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Route all messages that start with '/' to the appropriate handler."""
     if update.message:
         text = update.message.text
     elif update.channel_post:
@@ -153,52 +170,78 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # ─── Bot Lifecycle ──────────────────────────────────────────
 
-
 async def run_broadcast_bot():
-    if not BROADCAST_BOT_TOKEN:
-        print("Error: BROADCAST_BOT_TOKEN environment variable not set.")
-        sys.exit(1)
+    """
+    Main entry point for the broadcast bot.
+    Initializes the database, loads cache, sets up the application,
+    and starts polling. Restarts automatically if it crashes.
+    """
+    while True:
+        try:
+            if not BROADCAST_BOT_TOKEN:
+                print("Error: BROADCAST_BOT_TOKEN environment variable not set.")
+                sys.exit(1)
 
-    print("Initializing database...")
-    await init_db()
+            print("Initializing database...")
+            await init_db()
 
-    print("Loading latest market data from database...")
-    await load_cache_from_db()
+            print("Loading latest market data from database...")
+            await load_cache_from_db()
 
-    app = ApplicationBuilder().token(BROADCAST_BOT_TOKEN).build()
-    app.add_handler(MessageHandler(filters.COMMAND, handle_command))
+            app = ApplicationBuilder().token(BROADCAST_BOT_TOKEN).build()
+            app.add_handler(MessageHandler(filters.COMMAND, handle_command))
 
-    job_queue = app.job_queue
-    if job_queue is None:
-        print("Error: JobQueue not available. Install python-telegram-bot[job-queue].")
-        sys.exit(1)
+            job_queue = app.job_queue
+            if job_queue is None:
+                print("Error: JobQueue not available. Install python-telegram-bot[job-queue].")
+                sys.exit(1)
 
-    # Store the job queue globally so other modules can trigger reloads
-    set_job_queue(job_queue)   # <--- NEW
+            set_job_queue(job_queue)
+            set_broadcast_bot(app.bot)  # used by the control bot for immediate updates
 
-    dummy_context = type('DummyContext', (), {
-        'job_queue': job_queue,
-        'bot': app.bot,
-    })()
+            dummy_context = type('DummyContext', (), {
+                'job_queue': job_queue,
+                'bot': app.bot,
+            })()
 
-    await update_cache(dummy_context)
-    job_queue.run_repeating(update_cache, interval=INTERVAL)
+            await update_cache(dummy_context)
+            job_queue.run_repeating(update_cache, interval=INTERVAL)
 
-    print(f"Broadcast bot started. Cache updates every {INTERVAL}s.")
-    print("Commands: /prices, /conf KEY, /help")
+            print(f"Broadcast bot started. Cache updates every {INTERVAL}s.")
+            print("Commands: /prices, /conf KEY, /help")
 
-    await app.initialize()
-    await app.start()
+            await app.initialize()
+            await app.start()
 
-    if app.updater is None:
-        print("Error: Updater is not available.")
-        sys.exit(1)
+            if app.updater is None:
+                print("Error: Updater is not available.")
+                sys.exit(1)
 
-    await app.updater.start_polling(allowed_updates=["message", "channel_post"])
+            await app.updater.start_polling(allowed_updates=["message", "channel_post"])
 
-    print("EXITING broadcast bot...")
-    if app.updater:
-        await app.updater.stop()
-    await app.stop()
-    await close_db()
-    await app.shutdown()
+            shutdown_event = asyncio.Event()
+            loop = asyncio.get_running_loop()
+
+            def signal_handler():
+                print("Received termination signal, shutting down broadcast bot...")
+                shutdown_event.set()
+
+            loop.add_signal_handler(signal.SIGINT, signal_handler)
+            loop.add_signal_handler(signal.SIGTERM, signal_handler)
+
+            await shutdown_event.wait()
+
+            print("EXITING broadcast bot...")
+            if app.updater:
+                await app.updater.stop()
+            await app.stop()
+            await close_db()
+            await app.shutdown()
+            break  # clean exit
+
+        except Exception as e:
+            print(f"❌ Broadcast bot crashed: {e}")
+            import traceback
+            traceback.print_exc()
+            print("🔄 Restarting broadcast bot in 5 seconds...")
+            await asyncio.sleep(5)

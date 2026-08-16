@@ -1,3 +1,8 @@
+"""
+Shared constants for the presentation layer, primarily the usage message
+displayed by the control bot.
+"""
+
 from ..domain import ProviderName
 
 USAGE_MESSAGE = (
@@ -7,6 +12,7 @@ USAGE_MESSAGE = (
         "        --type otc|p2p    | type=otc|p2p    (show only OTC or P2P)\n"
         "        --volume NUM      | volume=NUM      (volume for VWAP calculation)\n"
         "        --repeat SEC      | repeat=SEC      (start auto-updates every SEC seconds)\n"
+        "        --chat_id NUM     | chat_id=NUM     (activates subscription immediately, no key needed)\n"
         "/list                            (list your subscriptions)\n"
         "/stop <id>                       (pause subscription by ID)\n"
         "/resume <id>                     (resume subscription by ID)\n"

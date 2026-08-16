@@ -1,3 +1,8 @@
+"""
+Command‑line argument parsing for the /prices command.
+Supports both --key value and key=value styles.
+"""
+
 from decimal import Decimal
 from typing import cast
 
@@ -5,7 +10,7 @@ from ..domain import ProviderName
 
 
 def _handle_dash_arg(i: int, args: list[str]) -> tuple[str, str | None, int] | None:
-    """Handle --key value pattern. Returns (key, value, consumed) or None."""
+    """Parse --key value pattern. Returns (key, value, consumed_count) or None."""
     token = args[i]
     if not (token.startswith("--") and len(token) > 2):
         return None
@@ -18,7 +23,7 @@ def _handle_dash_arg(i: int, args: list[str]) -> tuple[str, str | None, int] | N
 
 
 def _handle_equals_arg(token: str) -> tuple[str, str] | None:
-    """Handle key=value pattern. Returns (key, value) or None."""
+    """Parse key=value pattern. Returns (key, value) or None."""
     if "=" not in token:
         return None
     key, value = token.split("=", 1)
@@ -34,7 +39,7 @@ def _handle_stop_arg(token: str) -> bool:
 
 
 def _extract_arg_pairs(args: list[str]) -> tuple[dict[str, str], list[str]]:
-    """Extract named arguments from command line."""
+    """Extract all named arguments from the command line. Returns (pairs, errors)."""
     pairs: dict[str, str] = {}
     errors: list[str] = []
 
@@ -71,7 +76,7 @@ def _extract_arg_pairs(args: list[str]) -> tuple[dict[str, str], list[str]]:
 
 
 def _parse_provider(value: str) -> ProviderName:
-    """Convert string to ProviderName."""
+    """Convert a string to a ProviderName enum."""
     try:
         return ProviderName[value.upper()]
     except KeyError:
@@ -79,7 +84,7 @@ def _parse_provider(value: str) -> ProviderName:
 
 
 def _parse_type_filter(value: str) -> str:
-    """Convert string to type filter."""
+    """Normalize type filter to uppercase 'OTC' or 'P2P'."""
     lower = value.lower()
     if lower not in ("otc", "p2p"):
         raise ValueError(f"Invalid type: {value}")
@@ -95,7 +100,7 @@ def _parse_volume(value: str) -> Decimal:
 
 
 def _parse_repeat_interval(value: str) -> int:
-    """Convert string to positive integer."""
+    """Convert string to a positive integer."""
     try:
         interval = int(value)
         if interval <= 0:
@@ -105,8 +110,12 @@ def _parse_repeat_interval(value: str) -> int:
         raise ValueError(f"Invalid repeat interval: {value}")
 
 
-def parse_prices_args(args: list[str]) -> tuple[ProviderName | None, str | None, Decimal | None, int | None, bool]:
-    """Parse /prices arguments strictly as named options."""
+def parse_prices_args(args: list[str]) -> tuple[
+    ProviderName | None, str | None, Decimal | None, int | None, bool, int | None]:
+    """
+    Main parser for /prices arguments.
+    Returns: (provider, type_filter, volume, repeat_interval, stop_flag, chat_id)
+    """
     pairs, errors = _extract_arg_pairs(args)
     if errors:
         raise ValueError(f"Invalid arguments: {', '.join(errors)}")
@@ -116,6 +125,7 @@ def parse_prices_args(args: list[str]) -> tuple[ProviderName | None, str | None,
     volume_str = pairs.get("volume")
     repeat_str = pairs.get("repeat") or pairs.get("watch")
     stop_str = pairs.get("stop")
+    chat_id_str = pairs.get("chat_id")
 
     provider = _parse_provider(provider_str) if provider_str is not None else None
     type_filter = _parse_type_filter(type_str) if type_str is not None else None
@@ -123,9 +133,16 @@ def parse_prices_args(args: list[str]) -> tuple[ProviderName | None, str | None,
     repeat_interval = _parse_repeat_interval(repeat_str) if repeat_str is not None else None
     stop_flag = stop_str == "true"
 
-    known_keys = {"provider", "type", "volume", "repeat", "watch", "stop"}
+    chat_id = None
+    if chat_id_str is not None:
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            raise ValueError(f"Invalid chat_id: {chat_id_str}")
+
+    known_keys = {"provider", "type", "volume", "repeat", "watch", "stop", "chat_id"}
     unknown_keys = [k for k in pairs.keys() if k not in known_keys]
     if unknown_keys:
         raise ValueError(f"Unknown options: {', '.join(unknown_keys)}")
 
-    return provider, type_filter, volume, repeat_interval, stop_flag
+    return provider, type_filter, volume, repeat_interval, stop_flag, chat_id

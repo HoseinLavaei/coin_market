@@ -1,3 +1,8 @@
+"""
+Database initialisation: creates TimescaleDB extension and all tables if they don't exist.
+Uses raw asyncpg for DDL operations (SQLAlchemy's create_all is not used for TimescaleDB).
+"""
+
 import urllib.parse
 
 import asyncpg
@@ -6,6 +11,10 @@ from ..environment import DATABASE_URL
 
 
 async def init_db():
+    """
+    Connect to the database and create all required tables and indexes.
+    TimescaleDB extension is enabled to support time‑series hypertables.
+    """
     try:
         parsed = urllib.parse.urlparse(DATABASE_URL)
         host = parsed.hostname
@@ -17,21 +26,23 @@ async def init_db():
         conn = await asyncpg.connect(host=host, port=port, user=user, password=password, database=database)
 
         try:
+            # Enable TimescaleDB extension
             await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
             print("TimescaleDB extension is ready.")
 
+            # Core market data tables
             await conn.execute("""
                                CREATE TABLE IF NOT EXISTS coin
                                (
-                                   coin_id     SERIAL PRIMARY KEY,
-                                   provider    VARCHAR     NOT NULL,
-                                   base        VARCHAR     NOT NULL,
-                                   quote       VARCHAR     NOT NULL,
+                                   coin_id        SERIAL PRIMARY KEY,
+                                   provider       VARCHAR     NOT NULL,
+                                   base           VARCHAR     NOT NULL,
+                                   quote          VARCHAR     NOT NULL,
                                    raw_buy_price  DECIMAL     NOT NULL,
                                    raw_sell_price DECIMAL     NOT NULL,
-                                   buy_fee     DECIMAL     NOT NULL,
-                                   sell_fee    DECIMAL     NOT NULL,
-                                   timestamp   TIMESTAMPTZ NOT NULL
+                                   buy_fee        DECIMAL     NOT NULL,
+                                   sell_fee       DECIMAL     NOT NULL,
+                                   timestamp      TIMESTAMPTZ NOT NULL
                                )
                                """)
             print("coin table ready")
@@ -56,6 +67,7 @@ async def init_db():
                                """)
             print("orderbook table ready")
 
+            # Collection tables for grouping IDs by (provider, base, quote)
             await conn.execute("""
                                CREATE TABLE IF NOT EXISTS coins
                                (
@@ -80,6 +92,7 @@ async def init_db():
                                """)
             print("orderbooks table ready")
 
+            # Subscription tables
             await conn.execute("""
                                CREATE TABLE IF NOT EXISTS pending_subscriptions
                                (
@@ -117,6 +130,7 @@ async def init_db():
                                """)
             print("subscriptions table ready")
 
+            # Indexes for common query patterns
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id)")
             print("subscriptions indexes ready")

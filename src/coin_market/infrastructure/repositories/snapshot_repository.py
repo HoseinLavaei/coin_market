@@ -1,3 +1,8 @@
+"""
+Repository for saving and loading market snapshots (OTC prices and order books)
+to/from TimescaleDB. Uses SQLAlchemy async sessions.
+"""
+
 from datetime import datetime
 
 import sqlalchemy as sa
@@ -11,6 +16,10 @@ from ...domain import Order as PydanticOrder, OrderBook as PydanticOrderBook, Or
 
 
 def _coin_key(coin: PydanticCoin) -> tuple[str, str, str, str, str]:
+    """
+    Generate a unique key for a coin based on provider, base, quote, and raw prices.
+    Used for deduplication in the database.
+    """
     return (
         coin.provider.name,
         coin.base.name,
@@ -21,6 +30,7 @@ def _coin_key(coin: PydanticCoin) -> tuple[str, str, str, str, str]:
 
 
 def _to_pydantic_coin(cm: Coin) -> PydanticCoin:
+    """Convert an SQLAlchemy Coin model to a Pydantic Coin."""
     return PydanticCoin(
         provider=ProviderName[cm.provider],
         base=AssetBase[cm.base],
@@ -34,6 +44,7 @@ def _to_pydantic_coin(cm: Coin) -> PydanticCoin:
 
 
 def _build_order_map(order_coin_pairs: list[tuple[Order, Coin]]) -> dict[int, PydanticOrder]:
+    """Build a mapping from order_id to Pydantic Order using joined Coin data."""
     order_map: dict[int, PydanticOrder] = {}
     for order, coin in order_coin_pairs:
         order_map[order.order_id] = PydanticOrder(
@@ -44,6 +55,10 @@ def _build_order_map(order_coin_pairs: list[tuple[Order, Coin]]) -> dict[int, Py
 
 
 async def _load_orderbooks(session, order_ids: list[int], order_map: dict[int, PydanticOrder]) -> PydanticOrderBooks:
+    """
+    Load OrderBook rows that reference any of the given order IDs.
+    Reconstruct Pydantic order books by looking up orders from the map.
+    """
     ob_rows = await session.execute(
         sa.select(OrderBook).where(
             sa.or_(
@@ -64,6 +79,10 @@ async def _load_orderbooks(session, order_ids: list[int], order_map: dict[int, P
 
 
 async def _insert_otc_coins(session, coins: PydanticCoins, now: datetime) -> dict:
+    """
+    Insert OTC coins into the coin table.
+    Returns a mapping from coin_key to the generated coin_id.
+    """
     coin_id_map = {}
     for key, coin in coins.coins.items():
         coin_model = Coin(
@@ -83,6 +102,9 @@ async def _insert_otc_coins(session, coins: PydanticCoins, now: datetime) -> dic
 
 
 async def _insert_orderbook_coins(session, orderbooks: PydanticOrderBooks, coin_id_map: dict, now: datetime) -> None:
+    """
+    Insert coins that appear only in order books (not already inserted as OTC).
+    """
     for book in orderbooks.books.values():
         for order in book.asks + book.bids:
             coin = order.coin
@@ -104,6 +126,10 @@ async def _insert_orderbook_coins(session, orderbooks: PydanticOrderBooks, coin_
 
 
 async def _insert_orders_and_orderbooks(session, orderbooks: PydanticOrderBooks, coin_id_map: dict) -> dict:
+    """
+    Insert Order and OrderBook rows for each order book.
+    Returns a mapping from (provider, quote, base) to the generated orderbook_id.
+    """
     orderbook_id_map = {}
     for key, book in orderbooks.books.items():
         provider, quote, base = key
@@ -131,6 +157,10 @@ async def _insert_orders_and_orderbooks(session, orderbooks: PydanticOrderBooks,
 
 
 async def _insert_collections(session, coin_id_map: dict, orderbook_id_map: dict) -> None:
+    """
+    Insert the Coins and OrderBooks collection tables that group IDs by (provider, base, quote).
+    """
+    # Group coin IDs
     group_coin_ids = {}
     for coin_key, coin_id in coin_id_map.items():
         provider, base, quote, _, _ = coin_key
@@ -139,6 +169,7 @@ async def _insert_collections(session, coin_id_map: dict, orderbook_id_map: dict
     for (provider_name, base_name, quote_name), coin_ids in group_coin_ids.items():
         session.add(Coins(provider=provider_name, base=base_name, quote=quote_name, coin_ids=coin_ids))
 
+    # Group orderbook IDs
     orderbook_collection_map = {}
     for (provider, quote, base), ob_id in orderbook_id_map.items():
         key = (provider.name, quote.name, base.name)
@@ -148,6 +179,10 @@ async def _insert_collections(session, coin_id_map: dict, orderbook_id_map: dict
 
 
 async def save_snapshot(coins: PydanticCoins, orderbooks: PydanticOrderBooks) -> None:
+    """
+    Persist a full snapshot (coins + orderbooks) to the database.
+    All data is inserted with the same timestamp.
+    """
     async with AsyncSessionLocal() as session:
         now = datetime.now()
         coin_id_map = await _insert_otc_coins(session, coins, now)
@@ -158,6 +193,10 @@ async def save_snapshot(coins: PydanticCoins, orderbooks: PydanticOrderBooks) ->
 
 
 async def load_latest_snapshot() -> tuple[PydanticCoins, PydanticOrderBooks] | None:
+    """
+    Load the most recent snapshot from the database.
+    Returns None if no snapshot exists.
+    """
     async with AsyncSessionLocal() as session:
         latest_ts_result = await session.execute(sa.select(func.max(Coin.timestamp)))
         latest_ts = latest_ts_result.scalar_one_or_none()
