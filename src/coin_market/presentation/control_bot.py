@@ -13,6 +13,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from .constants import USAGE_MESSAGE
+from .inline_keyboard import control_conversation
 from .parsers import parse_prices_args
 from ..domain import build_subscription_description
 from ..environment import CONTROL_BOT_TOKEN, KEY_EXPIRY_SECONDS, TIMEZONE
@@ -302,6 +303,8 @@ async def run_control_bot():
             app.add_handler(CommandHandler("resume", resume_command))
             app.add_handler(CommandHandler("delete", delete_command))
             app.add_handler(CommandHandler("help", help_command))
+
+            app.add_handler(control_conversation)
             print("Control bot started.")
             await app.initialize()
             await app.start()

@@ -7,8 +7,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     depends_on:
-      db:
-        condition: service_healthy
+      - db
     restart: always
     network_mode: host
     stop_grace_period: 60s
@@ -23,11 +22,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-coin_market_OLD}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
     stop_grace_period: 60s
 volumes:
   postgres_data:

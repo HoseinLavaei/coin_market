@@ -6,12 +6,13 @@ and runs the main polling loop. It also stores the bot instance for immediate up
 import asyncio
 import signal
 import sys
+import traceback
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 from .parsers import parse_prices_args
-from ..domain import ProviderName
+from ..domain.value_objects import build_subscription_description
 from ..environment import BROADCAST_BOT_TOKEN, INTERVAL
 from ..infrastructure import init_db, close_db
 from ..infrastructure.repositories import claim_pending_subscription, add_subscription, delete_pending_subscription
@@ -80,7 +81,13 @@ async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     key = args[0].strip()
     chat_id = effective_chat.id
 
-    data = await claim_pending_subscription(key, chat_id)
+    try:
+        data = await claim_pending_subscription(key, chat_id)
+    except Exception as e:
+        traceback.print_exc()
+        await message.reply_text(f"❌ Failed to claim subscription: {e}")
+        return
+
     if data is None:
         await message.reply_text("❌ Invalid or expired key. Please request a new one.")
         return
@@ -95,26 +102,34 @@ async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             repeat_interval=data["repeat_interval"],
         )
         await delete_pending_subscription(key)
+
         job_queue = context.job_queue
         if job_queue is None:
             await message.reply_text("❌ Job queue not available.")
             return
+
         schedule_subscription_job(job_queue, sub)
-        provider = ProviderName[sub.provider.upper()] if sub.provider else None
-        await send_market_data(
-            chat_id=sub.chat_id,
-            context=context,
-            provider=provider,
-            type_filter=sub.type_filter,
-            volume=sub.volume,
-            is_auto=True,
-        )
-        from ..domain.value_objects import build_subscription_description
+
+        # ─── Send first update ─────────────────────────────────
+        # Wrap in try/except to avoid showing error to user if it fails
+        try:
+            await send_market_data(
+                chat_id=sub.chat_id,
+                context=context,
+                provider=sub.provider,
+                type_filter=sub.type_filter,
+                volume=sub.volume,
+                is_auto=True,
+            )
+        except Exception as e:
+            print(f"⚠️ First update failed for subscription #{sub.id}: {e}")
+            traceback.print_exc()
+
         filter_desc = build_subscription_description(
             data["provider"],
             data["type_filter"],
             data["volume"],
-            None,
+            data["repeat_interval"],
         )
         await message.reply_text(
             f"✅ Subscription activated!\n"
@@ -123,6 +138,7 @@ async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             f"You will receive updates here."
         )
     except Exception as e:
+        traceback.print_exc()
         await message.reply_text(f"❌ Failed to create subscription: {e}")
 
 
@@ -197,7 +213,7 @@ async def run_broadcast_bot():
                 sys.exit(1)
 
             set_job_queue(job_queue)
-            set_broadcast_bot(app.bot)  # used by the control bot for immediate updates
+            set_broadcast_bot(app.bot)
 
             dummy_context = type('DummyContext', (), {
                 'job_queue': job_queue,
@@ -237,7 +253,7 @@ async def run_broadcast_bot():
             await app.stop()
             await close_db()
             await app.shutdown()
-            break  # clean exit
+            break
 
         except Exception as e:
             print(f"❌ Broadcast bot crashed: {e}")

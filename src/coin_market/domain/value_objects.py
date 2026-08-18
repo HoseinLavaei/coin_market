@@ -17,18 +17,24 @@ def build_subscription_description(
 ) -> str:
     """
     Build a human‑readable description of a subscription's filters.
-    Used in messages to users and in logs.
+    Supports comma-separated values for provider and type_filter.
     """
     parts = []
+
     if provider:
-        parts.append(f"🏛️ provider={provider}")
-    if type_filter:
-        if type_filter == "OTC":
-            parts.append("💰 type=OTC")
-        elif type_filter == "P2P":
-            parts.append("🤝 type=P2P")
+        if "," in provider:
+            provider_names = provider.split(",")
+            parts.append(f"🏛️ providers={', '.join(provider_names)}")
         else:
-            parts.append(f"type={type_filter}")
+            parts.append(f"🏛️ provider={provider}")
+
+    if type_filter:
+        if "," in type_filter:
+            type_names = type_filter.split(",")
+            parts.append(f"📊 types={', '.join(type_names)}")
+        else:
+            parts.append(f"📊 type={type_filter}")
+
     if volume is not None:
         parts.append(f"📦 volume={volume}")
     if repeat_interval is not None:
