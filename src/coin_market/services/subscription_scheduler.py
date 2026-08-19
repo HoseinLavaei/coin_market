@@ -216,3 +216,7 @@ async def reload_subscriptions_immediate() -> None:
         )
 
     print("✅ Subscriptions reloaded and immediate updates sent.")
+
+def get_job_queue() -> JobQueue | None:
+    """Return the global job queue."""
+    return _global_job_queue

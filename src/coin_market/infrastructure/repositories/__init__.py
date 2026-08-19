@@ -9,4 +9,5 @@ from .subscription_repository import (
     resume_subscription_by_id,
     delete_subscription_by_id,
     get_active_subscriptions,
+    update_subscription_by_id,
 )

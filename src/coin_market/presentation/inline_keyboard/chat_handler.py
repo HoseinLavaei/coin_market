@@ -43,8 +43,11 @@ async def handle_chat_custom(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     await safe_edit(
         query,
         text,
-        reply_markup=build_numeric_keyboard(),
-        parse_mode=None,  # No Markdown
+        reply_markup=build_numeric_keyboard(
+            include_negative=True,
+            allow_decimal=False,
+        ),
+        parse_mode=None,
     )
     return SELECT_CHAT
 
@@ -128,4 +131,10 @@ async def chat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def numeric_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle numeric keypad input for chat ID."""
-    return await handle_numeric_input(update, context, "chat_id", SELECT_CHAT)
+    return await handle_numeric_input(
+        update,
+        context,
+        "chat_id",
+        SELECT_CHAT,
+        include_negative=True,
+    )

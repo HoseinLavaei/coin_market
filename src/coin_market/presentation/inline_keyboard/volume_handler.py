@@ -4,16 +4,15 @@ Single‑select from presets or custom numeric input.
 """
 
 from decimal import Decimal
-
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_draft, clear_draft, handle_numeric_input, get_user_data
 from .menus import (
     build_volume_keyboard,
     build_numeric_keyboard,
     SELECT_VOLUME,
 )
+from .common import safe_edit, get_draft, clear_draft, handle_numeric_input, get_user_data
 
 
 async def show_volume(query, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -37,8 +36,8 @@ async def handle_volume_custom(query, context: ContextTypes.DEFAULT_TYPE) -> int
     await safe_edit(
         query,
         text,
-        reply_markup=build_numeric_keyboard(),
-        parse_mode=None,  # No Markdown
+        reply_markup=build_numeric_keyboard(include_negative=False, allow_decimal=True),
+        parse_mode=None,
     )
     return SELECT_VOLUME
 

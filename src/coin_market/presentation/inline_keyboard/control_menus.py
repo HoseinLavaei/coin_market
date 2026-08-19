@@ -1,21 +1,13 @@
 """
 Conversation logic for Control Bot menus.
-Uses builders from .menus and handlers from selection_handlers, volume_handler, repeat_handler, chat_handler, confirm_handler.
+Uses builders from .menus and handlers from selection_handlers, volume_handler, repeat_handler, chat_handler, confirm_handler,
+stop_handler, resume_handler, edit_handler, delete_handler, help_handler.
 Entry point: /start
 """
 
 from telegram import Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ConversationHandler
 
-from .chat_handler import (
-    show_chat,
-    chat_callback,
-    numeric_callback as chat_numeric_callback,
-)
-from .common import safe_edit, get_draft, clear_draft
-from .confirm_handler import (
-    confirm_callback,
-)
 from .menus import (
     build_control_main_menu,
     SELECT_PROVIDER,
@@ -25,11 +17,7 @@ from .menus import (
     SELECT_CHAT,
     CONFIRM,
 )
-from .repeat_handler import (
-    show_repeat,
-    repeat_callback,
-    numeric_callback as repeat_numeric_callback,
-)
+from .common import safe_edit, get_draft, clear_draft, get_user_data, SELECT_EDIT_SUB
 from .selection_handlers import (
     show_selection,
     selection_callback,
@@ -39,14 +27,54 @@ from .volume_handler import (
     volume_callback,
     numeric_callback as volume_numeric_callback,
 )
-from ...domain.value_objects import build_subscription_description
+from .repeat_handler import (
+    show_repeat,
+    repeat_callback,
+    numeric_callback as repeat_numeric_callback,
+)
+from .chat_handler import (
+    show_chat,
+    chat_callback,
+    numeric_callback as chat_numeric_callback,
+)
+from .confirm_handler import (
+    confirm_callback,
+)
+from .stop_handler import (
+    stop_subscription_menu,
+    stop_callback,
+    stop_confirm_callback,
+    SELECT_STOP_SUB,
+    CONFIRM_STOP,
+)
+from .resume_handler import (
+    resume_subscription_menu,
+    resume_callback,
+    resume_confirm_callback,
+    SELECT_RESUME_SUB,
+    CONFIRM_RESUME,
+)
+from .edit_handler import (
+    edit_subscription_menu,
+    edit_selection_callback,
+)
+from .delete_handler import (
+    delete_subscription_menu,
+    delete_callback,
+    delete_confirm_callback,
+    SELECT_DELETE_SUB,
+    CONFIRM_DELETE,
+)
+from .help_handler import (
+    show_help,
+)
 from ...infrastructure.repositories import get_subscriptions_for_user
+from ...domain.value_objects import build_subscription_description
 
 
 # ─── Numeric Callback Wrappers ─────────────────────────────
 
 async def volume_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper for volume numeric callback."""
     result = await volume_numeric_callback(update, context)
     if result == ConversationHandler.END:
         query = update.callback_query
@@ -56,7 +84,6 @@ async def volume_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def repeat_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper for repeat numeric callback."""
     result = await repeat_numeric_callback(update, context)
     if result == ConversationHandler.END:
         query = update.callback_query
@@ -66,7 +93,6 @@ async def repeat_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def chat_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper for chat numeric callback."""
     result = await chat_numeric_callback(update, context)
     if result == ConversationHandler.END:
         query = update.callback_query
@@ -116,20 +142,15 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await list_subscriptions(update, context)
             return ConversationHandler.END
         case "stop":
-            await safe_edit(query, "⏸️ Stop Subscription (coming soon)")
-            return ConversationHandler.END
+            return await stop_subscription_menu(update, context)
         case "resume":
-            await safe_edit(query, "▶️ Resume Subscription (coming soon)")
-            return ConversationHandler.END
+            return await resume_subscription_menu(update, context)
         case "edit":
-            await safe_edit(query, "✏️ Edit Subscription (coming soon)")
-            return ConversationHandler.END
+            return await edit_subscription_menu(update, context)
         case "delete":
-            await safe_edit(query, "🗑️ Delete Subscription (coming soon)")
-            return ConversationHandler.END
+            return await delete_subscription_menu(update, context)
         case "help":
-            await safe_edit(query, "❓ Help (coming soon)")
-            return ConversationHandler.END
+            return await show_help(update, context)
         case _:
             await safe_edit(query, "❌ Unknown action.")
             return ConversationHandler.END
@@ -173,6 +194,10 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if query:
         await query.answer()
         clear_draft(context)
+        user_data = get_user_data(context)
+        user_data.pop("stop_selected", None)
+        user_data.pop("resume_selected", None)
+        user_data.pop("delete_selected", None)
         await safe_edit(query, "❌ Cancelled.")
     return ConversationHandler.END
 
@@ -183,6 +208,7 @@ control_conversation = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(main_menu_callback, pattern="^main:"),
         CommandHandler("start", show_main_menu),
+        CommandHandler("menu", show_main_menu),  # Added this line
     ],
     states={
         SELECT_PROVIDER: [
@@ -211,6 +237,28 @@ control_conversation = ConversationHandler(
         ],
         CONFIRM: [
             CallbackQueryHandler(confirm_callback, pattern="^confirm:"),
+        ],
+        SELECT_STOP_SUB: [
+            CallbackQueryHandler(stop_callback, pattern="^stop"),
+        ],
+        CONFIRM_STOP: [
+            CallbackQueryHandler(stop_confirm_callback, pattern="^stop_confirm:"),
+        ],
+        SELECT_RESUME_SUB: [
+            CallbackQueryHandler(resume_callback, pattern="^resume"),
+        ],
+        CONFIRM_RESUME: [
+            CallbackQueryHandler(resume_confirm_callback, pattern="^resume_confirm:"),
+        ],
+        SELECT_EDIT_SUB: [
+            CallbackQueryHandler(edit_selection_callback, pattern="^edit_sel:"),
+            CallbackQueryHandler(edit_selection_callback, pattern="^edit_cancel"),
+        ],
+        SELECT_DELETE_SUB: [
+            CallbackQueryHandler(delete_callback, pattern="^delete"),
+        ],
+        CONFIRM_DELETE: [
+            CallbackQueryHandler(delete_confirm_callback, pattern="^delete_confirm:"),
         ],
     },
     fallbacks=[
