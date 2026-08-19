@@ -9,8 +9,14 @@ import sys
 import traceback
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
+from .broadcast_bot_help_text import get_broadcast_help_text
 from .parsers import parse_prices_args
 from ..domain.value_objects import build_subscription_description
 from ..environment import BROADCAST_BOT_TOKEN, INTERVAL
@@ -23,15 +29,16 @@ from ..services import (
     set_job_queue,
     set_broadcast_bot,
 )
+from .inline_keyboard import (
+    broadcast_conversation,
+    show_broadcast_main_menu,
+)
 
 
 # ─── Command Handlers ──────────────────────────────────────
 
 async def handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Show a one‑time market snapshot. Optionally filters by provider, type, volume, or chat_id.
-    If --chat_id is provided, send the snapshot to that chat instead of the current one.
-    """
+    """Show a one‑time market snapshot."""
     message = update.effective_message
     if message is None:
         return
@@ -63,10 +70,7 @@ async def handle_prices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Activate a pending subscription using a one‑time key.
-    The key must have been created by the control bot.
-    """
+    """Activate a pending subscription using a key."""
     message = update.effective_message
     if message is None:
         return
@@ -110,8 +114,6 @@ async def handle_conf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         schedule_subscription_job(job_queue, sub)
 
-        # ─── Send first update ─────────────────────────────────
-        # Wrap in try/except to avoid showing error to user if it fails
         try:
             await send_market_data(
                 chat_id=sub.chat_id,
@@ -147,19 +149,40 @@ async def handle_help(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> No
     message = update.effective_message
     if message is None:
         return
-    await message.reply_text(
-        "🤖 Broadcast Bot\n\n"
-        "This bot broadcasts live market data (OTC & P2P) to your chat.\n\n"
-        "Commands:\n"
-        "  /prices [--provider NAME] [--type otc|p2p] [--volume NUM] – Show market data once.\n"
-        "  /conf KEY – Activate a subscription using a key from the control bot.\n"
-        "  /help – Show this message.\n\n"
-        "To get a subscription key, use the control bot with /prices --repeat SEC."
-    )
+    await message.reply_text(get_broadcast_help_text())
+
+
+# ─── Dedicated handler for /start and /menu ────────────────────
+
+async def handle_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle /start and /menu commands explicitly.
+    Works for both messages and channel posts.
+    """
+    # Determine the command text
+    if update.message:
+        text = update.message.text
+    elif update.channel_post:
+        text = update.channel_post.text
+    else:
+        return
+    if not text:
+        return
+    parts = text.split()
+    if not parts:
+        return
+    cmd = parts[0].lower()
+    if cmd not in ('/start', '/menu'):
+        return
+    # Forward to the menu display
+    await show_broadcast_main_menu(update, context)
 
 
 async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Route all messages that start with '/' to the appropriate handler."""
+    """
+    Route all messages that start with '/' to the appropriate handler.
+    Works for both regular messages and channel posts.
+    """
     if update.message:
         text = update.message.text
     elif update.channel_post:
@@ -182,6 +205,7 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await handle_conf(update, context)
     elif command == "help":
         await handle_help(update, context)
+    # /start and /menu are already handled by the dedicated handler, so we ignore them here
 
 
 # ─── Bot Lifecycle ──────────────────────────────────────────
@@ -205,7 +229,21 @@ async def run_broadcast_bot():
             await load_cache_from_db()
 
             app = ApplicationBuilder().token(BROADCAST_BOT_TOKEN).build()
-            app.add_handler(MessageHandler(filters.COMMAND, handle_command))
+
+            # ─── Dedicated handler for /start and /menu (no regex, just command check) ──
+            app.add_handler(MessageHandler(
+                filters.COMMAND & (filters.UpdateType.MESSAGE | filters.UpdateType.CHANNEL_POST),
+                handle_start_menu
+            ))
+
+            # ─── Inline menu conversation ─────────────────────────────────
+            app.add_handler(broadcast_conversation)
+
+            # ─── Command handlers for other commands ──────────────────────
+            app.add_handler(MessageHandler(
+                filters.COMMAND & (filters.UpdateType.MESSAGE | filters.UpdateType.CHANNEL_POST),
+                handle_command
+            ))
 
             job_queue = app.job_queue
             if job_queue is None:
@@ -233,7 +271,9 @@ async def run_broadcast_bot():
                 print("Error: Updater is not available.")
                 sys.exit(1)
 
-            await app.updater.start_polling(allowed_updates=["message", "channel_post"])
+            await app.updater.start_polling(
+                allowed_updates=["message", "channel_post", "callback_query"]
+            )
 
             shutdown_event = asyncio.Event()
             loop = asyncio.get_running_loop()
