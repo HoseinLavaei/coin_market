@@ -6,8 +6,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from .common import safe_edit, get_draft, SELECT_EDIT_SUB
-from ...infrastructure.repositories import get_subscriptions_for_user
 from ...domain.value_objects import build_subscription_description
+from ...infrastructure.repositories import get_subscriptions_for_user
 
 
 async def edit_subscription_menu(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> int:

@@ -1,55 +1,35 @@
 """
 Builds the formatted text message for market data output.
-Groups OTC and P2P data by provider and applies filters.
+Leverages __str__ methods from domain objects for formatting.
 """
 
 from decimal import Decimal
-from typing import Sequence, List
+from typing import Optional, Sequence, List
 
-from ..domain import Coins, OrderBooks, Coin, OrderBook, Quote, Base, ProviderName
-
-
-# ─── Helper: Parse provider string ─────────────────────────
-
-def _parse_provider_string(provider_str: str) -> List[ProviderName]:
-    """
-    Parse a provider string (single or comma-separated) into a list of ProviderName enums.
-    Invalid names are silently ignored.
-    """
-    if "," in provider_str:
-        names = [name.strip() for name in provider_str.split(",") if name.strip()]
-        result = []
-        for name in names:
-            try:
-                result.append(ProviderName[name.upper()])
-            except KeyError:
-                pass
-        return result
-    else:
-        try:
-            return [ProviderName[provider_str.upper()]]
-        except KeyError:
-            return []
+from ..domain import Coins, OrderBook, OrderBooks, Coin, Quote, Base, ProviderName
 
 
-# ─── Helper: Normalize provider input ──────────────────────
+# ─── Provider parsing ───────────────────────────────────────
 
 def _normalize_provider(provider: ProviderName | str | None) -> List[ProviderName]:
-    """
-    Convert provider input to a list of ProviderName enums.
-    - None → empty list (means "all providers")
-    - ProviderName → single-item list
-    - String → parsed via _parse_provider_string()
-    """
+    """Convert provider input to a list of ProviderName enums."""
     if provider is None:
         return []
-
     if isinstance(provider, ProviderName):
         return [provider]
-
     if isinstance(provider, str):
-        return _parse_provider_string(provider)
-
+        if "," in provider:
+            result = []
+            for name in provider.split(","):
+                try:
+                    result.append(ProviderName[name.strip().upper()])
+                except KeyError:
+                    pass
+            return result
+        try:
+            return [ProviderName[provider.upper()]]
+        except KeyError:
+            return []
     return []
 
 
@@ -57,10 +37,9 @@ def _filter_keys(
         all_keys: list[tuple[ProviderName, Quote, Base]],
         provider_list: Sequence[ProviderName],
 ) -> list[tuple[ProviderName, Quote, Base]]:
-    """Filter keys to only those matching the given provider list."""
+    """Filter keys to selected providers, sorted by name."""
     if not provider_list:
         return sorted(all_keys, key=lambda x: x[0].value)
-
     provider_set = set(provider_list)
     return sorted(
         [k for k in all_keys if k[0] in provider_set],
@@ -68,41 +47,124 @@ def _filter_keys(
     )
 
 
-def _get_display_keys(
+# ─── Candidate collection ───────────────────────────────────
+
+def _candidates_from_key(
+        provider: ProviderName,
+        quote: Quote,
+        base: Base,
         coins: Coins,
         books: OrderBooks,
-        provider: ProviderName | str | None,
-) -> list[tuple[ProviderName, Quote, Base]]:
-    """
-    Determine the list of (provider, quote, base) keys to display.
-    """
-    all_keys = list(set(coins.coins.keys()) | set(books.books.keys()))
-    provider_list = _normalize_provider(provider)
-    return _filter_keys(all_keys, provider_list)
+        show_otc: bool,
+        show_p2p: bool,
+        volume: Decimal,
+) -> list[tuple[Coin, ProviderName, str]]:
+    """Collect candidates (Coin, provider, type) from a single (provider, quote, base) key."""
+    candidates = []
+    if show_otc:
+        coin = coins.coins.get((provider, quote, base))
+        if coin is not None:
+            candidates.append((coin, provider, "OTC"))
+    if show_p2p:
+        book = books.books.get((provider, quote, base))
+        if book is not None:
+            try:
+                vwap_coin = book.get_by_volume(volume)
+                candidates.append((vwap_coin, provider, "P2P"))
+            except ValueError:
+                pass
+    return candidates
 
 
-# ─── Formatting helpers ─────────────────────────────────────
+def _collect_candidates(
+        coins: Coins,
+        books: OrderBooks,
+        keys: list[tuple[ProviderName, Quote, Base]],
+        show_otc: bool,
+        show_p2p: bool,
+        volume: Decimal,
+) -> list[tuple[Coin, ProviderName, str]]:
+    """Collect all available (Coin, provider, type) candidates."""
+    candidates = []
+    for provider, quote, base in keys:
+        candidates.extend(
+            _candidates_from_key(provider, quote, base, coins, books, show_otc, show_p2p, volume)
+        )
+    return candidates
 
-def _format_otc_section(coin: Coin | None) -> str:
-    if coin is None:
-        return "  💰 OTC: (No data)"
-    lines = str(coin).splitlines()
-    return "  💰 OTC:\n" + "\n".join(f"  {line}" for line in lines)
+
+# ─── Best prices summary ────────────────────────────────────
+
+def _get_best_prices(
+        coins: Coins,
+        books: OrderBooks,
+        keys: list[tuple[ProviderName, Quote, Base]],
+        show_otc: bool,
+        show_p2p: bool,
+        volume: Decimal,
+) -> tuple[Optional[tuple[Coin, ProviderName, str]], Optional[tuple[Coin, ProviderName, str]]]:
+    """Find the Best Buy and sell prices across all providers/types."""
+    candidates = _collect_candidates(coins, books, keys, show_otc, show_p2p, volume)
+    if not candidates:
+        return None, None
+
+    best_buy = min(candidates, key=lambda x: x[0].buy_price)
+    best_sell = max(candidates, key=lambda x: x[0].sell_price)
+    return best_buy, best_sell
 
 
-def _format_p2p_section(book: OrderBook | None, volume: Decimal) -> str:
+def _format_best_summary(
+        best_buy: Optional[tuple[Coin, ProviderName, str]],
+        best_sell: Optional[tuple[Coin, ProviderName, str]],
+) -> str:
+    """Format Best Buy/sell as a small summary block."""
+    if best_buy is None and best_sell is None:
+        return "📭 No market data available."
+
+    lines = ["🏆 Best"]
+    if best_buy is not None:
+        coin, provider, typ = best_buy
+        buy_str, _ = coin.get_formatted_price()
+        lines.append(f"    🟢 : {buy_str} ({provider.value}, {typ})")
+    if best_sell is not None:
+        coin, provider, typ = best_sell
+        _, sell_str = coin.get_formatted_price()
+        lines.append(f"    🔴 : {sell_str} ({provider.value}, {typ})")
+
+    return "\n".join(lines)
+
+
+# ─── Determine which types to show ─────────────────────────
+
+def _determine_show_types(type_filter: str | None) -> tuple[bool, bool]:
+    """Return (show_otc, show_p2p) based on type_filter."""
+    if type_filter and type_filter.upper() == "OTC":
+        return True, False
+    if type_filter and type_filter.upper() == "P2P":
+        return False, True
+    return True, True  # default: show both
+
+
+# ─── Formatting lines for provider block ────────────────────
+
+def _format_otc_line(coin: Coin | None) -> str:
+    """Return the formatted OTC line for a provider."""
+    return f"  💰 OTC:  {str(coin) if coin else '(No data)'}"
+
+
+def _format_p2p_line(book: OrderBook | None, volume: Decimal) -> str:
+    """Return the formatted P2P line for a provider."""
     if book is None:
         return "  📚 P2P: (No data)"
     try:
-        vwap_coin = book.get_by_volume(volume)
-        lines = str(vwap_coin).splitlines()
-        return "  📚 P2P:\n" + "\n".join(f"  {line}" for line in lines)
+        vwap = book.get_by_volume(volume)
+        return f"  📚 P2P:  {str(vwap)}"
     except ValueError:
         return "  📚 P2P: (No data)"
 
 
-def _format_provider_block(
-        provider_key: ProviderName,
+def _build_provider_block(
+        provider: ProviderName,
         quote: Quote,
         base: Base,
         coins: Coins,
@@ -111,14 +173,33 @@ def _format_provider_block(
         show_p2p: bool,
         volume: Decimal,
 ) -> str:
-    lines = [f"📦 {provider_key.value} / {base.value} / {quote.value}"]
+    """Build a single provider block."""
+    lines = [f"📦 {provider.value}"]
+
     if show_otc:
-        coin = coins.coins.get((provider_key, quote, base))
-        lines.append(_format_otc_section(coin))
+        coin = coins.coins.get((provider, quote, base))
+        lines.append(_format_otc_line(coin))
+
     if show_p2p:
-        book = books.books.get((provider_key, quote, base))
-        lines.append(_format_p2p_section(book, volume))
+        book = books.books.get((provider, quote, base))
+        lines.append(_format_p2p_line(book, volume))
+
     return "\n".join(lines)
+
+
+def _build_provider_blocks(
+        keys: list[tuple[ProviderName, Quote, Base]],
+        coins: Coins,
+        books: OrderBooks,
+        show_otc: bool,
+        show_p2p: bool,
+        volume: Decimal,
+) -> list[str]:
+    """Build the formatted blocks for each provider."""
+    return [
+        _build_provider_block(provider, quote, base, coins, books, show_otc, show_p2p, volume)
+        for provider, quote, base in keys
+    ]
 
 
 # ─── Main output builder ────────────────────────────────────
@@ -130,33 +211,20 @@ def build_prices_output(
         type_filter: str | None = None,
         volume: Decimal | None = None,
 ) -> str:
-    # ─── Determine which types to show ──────────────────────
-    if type_filter:
-        if "," in type_filter:
-            show_otc = True
-            show_p2p = True
-        elif type_filter.upper() == "OTC":
-            show_otc = True
-            show_p2p = False
-        elif type_filter.upper() == "P2P":
-            show_otc = False
-            show_p2p = True
-        else:
-            show_otc = True
-            show_p2p = True
-    else:
-        show_otc = True
-        show_p2p = True
+    show_otc, show_p2p = _determine_show_types(type_filter)
 
-    keys = _get_display_keys(coins, books, provider)
+    all_keys = list(set(coins.coins.keys()) | set(books.books.keys()))
+    keys = _filter_keys(all_keys, _normalize_provider(provider))
+
     if not keys:
-        if provider:
-            return f"📭 No data available for provider {provider}."
-        return "📭 No data available."
+        return f"📭 No data available." + (f" for {provider}" if provider else "")
 
     vol = volume if volume is not None else Decimal(1)
-    blocks = [
-        _format_provider_block(p, q, b, coins, books, show_otc, show_p2p, vol)
-        for p, q, b in keys
-    ]
-    return "\n".join(blocks)
+
+    blocks = _build_provider_blocks(keys, coins, books, show_otc, show_p2p, vol)
+
+    summary = _format_best_summary(
+        *_get_best_prices(coins, books, keys, show_otc, show_p2p, vol)
+    )
+
+    return f"{summary}\n\n" + "\n\n".join(blocks)

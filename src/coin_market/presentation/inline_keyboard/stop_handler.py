@@ -6,6 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from .common import safe_edit, get_user_data
+from ...domain.value_objects import build_subscription_description
 from ...infrastructure.repositories import (
     get_subscriptions_for_user,
     pause_subscription_by_id,
@@ -14,7 +15,6 @@ from ...services.subscription_scheduler import (
     remove_subscription_job,
     reload_subscriptions_immediate,
 )
-from ...domain.value_objects import build_subscription_description
 
 # ─── State constants ─────────────────────────────────────────
 SELECT_STOP_SUB = 20

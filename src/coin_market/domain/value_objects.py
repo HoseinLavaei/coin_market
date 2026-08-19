@@ -1,14 +1,6 @@
 from decimal import Decimal
 
 
-def indent_text(text: str, spaces: int = 4) -> str:
-    """Indent every line of a multi‑line string by the given number of spaces."""
-    if not text:
-        return text
-    indent = " " * spaces
-    return "\n".join(f"{indent}{line}" for line in text.splitlines())
-
-
 def build_subscription_description(
         provider: str | None,
         type_filter: str | None,

@@ -8,6 +8,29 @@ Entry point: /start
 from telegram import Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ConversationHandler
 
+from .chat_handler import (
+    show_chat,
+    chat_callback,
+    numeric_callback as chat_numeric_callback,
+)
+from .common import safe_edit, get_draft, clear_draft, get_user_data, SELECT_EDIT_SUB
+from .confirm_handler import (
+    confirm_callback,
+)
+from .delete_handler import (
+    delete_subscription_menu,
+    delete_callback,
+    delete_confirm_callback,
+    SELECT_DELETE_SUB,
+    CONFIRM_DELETE,
+)
+from .edit_handler import (
+    edit_subscription_menu,
+    edit_selection_callback,
+)
+from .help_handler import (
+    show_help,
+)
 from .menus import (
     build_control_main_menu,
     SELECT_PROVIDER,
@@ -17,35 +40,10 @@ from .menus import (
     SELECT_CHAT,
     CONFIRM,
 )
-from .common import safe_edit, get_draft, clear_draft, get_user_data, SELECT_EDIT_SUB
-from .selection_handlers import (
-    show_selection,
-    selection_callback,
-)
-from .volume_handler import (
-    show_volume,
-    volume_callback,
-    numeric_callback as volume_numeric_callback,
-)
 from .repeat_handler import (
     show_repeat,
     repeat_callback,
     numeric_callback as repeat_numeric_callback,
-)
-from .chat_handler import (
-    show_chat,
-    chat_callback,
-    numeric_callback as chat_numeric_callback,
-)
-from .confirm_handler import (
-    confirm_callback,
-)
-from .stop_handler import (
-    stop_subscription_menu,
-    stop_callback,
-    stop_confirm_callback,
-    SELECT_STOP_SUB,
-    CONFIRM_STOP,
 )
 from .resume_handler import (
     resume_subscription_menu,
@@ -54,22 +52,24 @@ from .resume_handler import (
     SELECT_RESUME_SUB,
     CONFIRM_RESUME,
 )
-from .edit_handler import (
-    edit_subscription_menu,
-    edit_selection_callback,
+from .selection_handlers import (
+    show_selection,
+    selection_callback,
 )
-from .delete_handler import (
-    delete_subscription_menu,
-    delete_callback,
-    delete_confirm_callback,
-    SELECT_DELETE_SUB,
-    CONFIRM_DELETE,
+from .stop_handler import (
+    stop_subscription_menu,
+    stop_callback,
+    stop_confirm_callback,
+    SELECT_STOP_SUB,
+    CONFIRM_STOP,
 )
-from .help_handler import (
-    show_help,
+from .volume_handler import (
+    show_volume,
+    volume_callback,
+    numeric_callback as volume_numeric_callback,
 )
-from ...infrastructure.repositories import get_subscriptions_for_user
 from ...domain.value_objects import build_subscription_description
+from ...infrastructure.repositories import get_subscriptions_for_user
 
 
 # ─── Numeric Callback Wrappers ─────────────────────────────

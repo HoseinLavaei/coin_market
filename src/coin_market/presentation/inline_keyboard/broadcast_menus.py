@@ -7,6 +7,8 @@ Activation uses numeric keypad (6-digit).
 from telegram import Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ConversationHandler
 
+from .broadcast_confirm_handler import show_broadcast_confirm, broadcast_confirm_callback
+from .common import safe_edit, get_draft, clear_draft, get_user_data
 from .menus import (
     build_broadcast_main_menu,
     build_volume_keyboard,
@@ -16,13 +18,11 @@ from .menus import (
     SELECT_VOLUME,
     CONFIRM,
 )
-from .common import safe_edit, get_draft, clear_draft, get_user_data
 from .selection_handlers import show_selection, selection_callback
 from .volume_handler import volume_callback, numeric_callback as volume_numeric_callback
-from .broadcast_confirm_handler import show_broadcast_confirm, broadcast_confirm_callback
 from ..broadcast_bot_help_text import get_broadcast_help_text
-from ...infrastructure.repositories import claim_pending_subscription, add_subscription, delete_pending_subscription
 from ...domain.value_objects import build_subscription_description
+from ...infrastructure.repositories import claim_pending_subscription, add_subscription, delete_pending_subscription
 from ...services.subscription_scheduler import schedule_subscription_job, get_job_queue, send_market_data
 
 # ─── Custom states for broadcast ─────────────────────────────

@@ -70,7 +70,7 @@ def _build_market_data_message(
     timestamp = updated_at.strftime('%H:%M:%S')
     content = build_prices_output(coins, orderbooks, provider, type_filter, volume)
     prefix = "🔄 Auto-update" if is_auto else "📊 Market data"
-    return f"{prefix} ({filter_desc}, 🕒 updated at {timestamp})\n\n{content}"
+    return f"{content}\n\n{prefix} ({filter_desc}, 🕒 updated at {timestamp})"
 
 
 # ─── Helper: Send with retry ────────────────────────────────
@@ -216,6 +216,7 @@ async def reload_subscriptions_immediate() -> None:
         )
 
     print("✅ Subscriptions reloaded and immediate updates sent.")
+
 
 def get_job_queue() -> JobQueue | None:
     """Return the global job queue."""

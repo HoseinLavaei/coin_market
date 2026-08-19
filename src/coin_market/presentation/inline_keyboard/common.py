@@ -2,8 +2,9 @@
 Common utilities for menu handlers.
 """
 
-from typing import cast
 from decimal import Decimal
+from typing import cast
+
 from telegram import Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
@@ -73,10 +74,10 @@ async def safe_edit_markup(query, reply_markup) -> None:
 # ─── Numeric Keyboard Helpers ─────────────────────────────
 
 async def _update_numeric_display(
-    query,
-    num_buffer: str,
-    num_field: str,
-    include_negative: bool = False,
+        query,
+        num_buffer: str,
+        num_field: str,
+        include_negative: bool = False,
 ) -> None:
     """Update the numeric keypad display."""
     display = num_buffer if num_buffer else " "
@@ -177,12 +178,12 @@ def _set_draft_value(context: ContextTypes.DEFAULT_TYPE, num_field: str, value) 
 # ─── Handle confirm ─────────────────────────────────────────
 
 async def _handle_numeric_confirm(
-    query,
-    context: ContextTypes.DEFAULT_TYPE,
-    user_data: dict,
-    num_buffer: str,
-    num_field: str,
-    state: int,
+        query,
+        context: ContextTypes.DEFAULT_TYPE,
+        user_data: dict,
+        num_buffer: str,
+        num_field: str,
+        state: int,
 ) -> int:
     """Handle confirm (Next) key."""
     if not num_buffer or num_buffer in ("-", "."):
@@ -211,9 +212,9 @@ async def _handle_numeric_confirm(
 
 
 async def _handle_numeric_back(
-    context: ContextTypes.DEFAULT_TYPE,
-    user_data: dict,
-    num_field: str,
+        context: ContextTypes.DEFAULT_TYPE,
+        user_data: dict,
+        num_field: str,
 ) -> int:
     user_data.pop("num_buffer", None)
     user_data.pop("num_field", None)
@@ -228,11 +229,11 @@ async def _handle_numeric_back(
 # ─── Main Numeric Input Handler ────────────────────────────
 
 async def handle_numeric_input(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    field: str,
-    state: int,
-    include_negative: bool = False,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        field: str,
+        state: int,
+        include_negative: bool = False,
 ) -> int:
     query = update.callback_query
     if not query:

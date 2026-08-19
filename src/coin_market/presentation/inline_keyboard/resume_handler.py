@@ -6,6 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from .common import safe_edit, get_user_data
+from ...domain.value_objects import build_subscription_description
 from ...infrastructure.repositories import (
     get_subscriptions_for_user,
     resume_subscription_by_id,
@@ -13,7 +14,6 @@ from ...infrastructure.repositories import (
 from ...services.subscription_scheduler import (
     reload_subscriptions_immediate,
 )
-from ...domain.value_objects import build_subscription_description
 
 # ─── State constants ─────────────────────────────────────────
 SELECT_RESUME_SUB = 22

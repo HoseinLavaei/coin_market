@@ -5,7 +5,6 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 from .enums import ProviderName, Base, Quote
-from .value_objects import indent_text
 from ..environment import TIMEZONE
 
 
@@ -40,7 +39,7 @@ class Coin(BaseModel):
 
     def __str__(self) -> str:
         buy_str, sell_str = self.get_formatted_price()
-        return f"🟢 Buy: {buy_str} 🔴 Sell: {sell_str}"
+        return f"🟢 : {buy_str} 🔴 : {sell_str}"
 
     def to_timezone(self) -> "Coin":
         """Convert timestamp to the project's configured timezone."""
@@ -84,8 +83,7 @@ class Order(BaseModel):
         return Order(coin=self.coin.to_timezone(), quantity=self.quantity)
 
     def __str__(self) -> str:
-        price_str, _ = self.coin.get_formatted_price()
-        return f"📊 {self.coin.base.value} @ {price_str} | 📦 Vol: {self.quantity:,.2f} {self.coin.base.value}"
+        return str(self.coin)
 
     def to_dict(self) -> dict:
         return {"coin": self.coin.to_dict(), "quantity": str(self.quantity)}
@@ -186,7 +184,7 @@ class OrderBook(BaseModel):
             return "📭 P2P: (No data)"
         try:
             coin = self.get_by_volume(volume)
-            return str(coin)
+            return f"📭 P2P: {str(coin)}"
         except ValueError:
             return "📭 P2P: (No data)"
 
@@ -227,9 +225,9 @@ class Coins(BaseModel):
 
     def __str__(self) -> str:
         if not self.coins:
-            return "💰 OTC prices:  (No coins)"
+            return "💰 OTC : (No coins)"
         content = "\n\n".join(str(coin) for coin in self.coins.values())
-        return f"💰 OTC prices:\n{indent_text(content, 4)}"
+        return f"💰 OTC : {content}"
 
     def to_json(self) -> str:
         return json.dumps([coin.to_dict() for coin in self.coins.values()])
@@ -264,12 +262,11 @@ class OrderBooks(BaseModel):
     def to_string(self, volume: Decimal) -> str:
         """Format all order books as a readable string for a given volume."""
         if not self.books:
-            return "🤝 P2P prices: (No order books)"
+            return "🤝 P2P : (No data)"
         lines = []
-        for (provider, quote, base), book in self.books.items():
-            book_str = indent_text(book.to_string(volume), 4)
-            lines.append(f"📚 {provider.value}/{quote.value}/{base.value}:\n{book_str}")
-        return "🤝 P2P prices:\n" + indent_text("\n\n".join(lines), 4)
+        for book in self.books.values():
+            lines.append(f"📚 {book.to_string(volume)}")
+        return "🤝 P2P :\n" + "\n\n".join(lines)
 
     def __str__(self) -> str:
         return self.to_string(Decimal(1))
