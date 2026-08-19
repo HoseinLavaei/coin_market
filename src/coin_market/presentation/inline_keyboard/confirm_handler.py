@@ -3,30 +3,31 @@ Confirm selection handler.
 Shows a summary of all selections and allows confirmation.
 """
 
+import secrets
 import traceback
+from datetime import datetime, timedelta
+
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
+from .common import safe_edit, get_draft, clear_draft
 from .menus import (
     build_confirm_keyboard,
     CONFIRM,
 )
-from .common import safe_edit, get_draft, clear_draft
 from ...domain.value_objects import build_subscription_description
+from ...environment import KEY_EXPIRY_SECONDS, TIMEZONE
+from ...infrastructure.repositories import (
+    add_subscription,
+    create_pending_subscription,
+    update_subscription_by_id,
+)
 from ...services.subscription_scheduler import (
     schedule_subscription_job,
     get_job_queue,
     send_market_data,
     reload_subscriptions_immediate,
 )
-from ...infrastructure.repositories import (
-    add_subscription,
-    create_pending_subscription,
-    update_subscription_by_id,
-)
-from ...environment import KEY_EXPIRY_SECONDS, TIMEZONE
-from datetime import datetime, timedelta
-import secrets
 
 
 # ─── Show confirm screen ─────────────────────────────────────
@@ -154,11 +155,11 @@ async def _handle_new_subscription(query, context, user_id: int) -> int:
         clear_draft(context)
         return ConversationHandler.END
 
-    else:
-        # ─── Key-based activation ─────────────────────────────
-        key = secrets.token_hex(4).upper()
-        expires_at = datetime.now(TIMEZONE) + timedelta(seconds=KEY_EXPIRY_SECONDS)
 
+    else:
+        # ─── Key-based activation with 6-digit numeric key ───────
+        key = str(secrets.randbelow(1000000)).zfill(6)
+        expires_at = datetime.now(TIMEZONE) + timedelta(seconds=KEY_EXPIRY_SECONDS)
         try:
             await create_pending_subscription(
                 key=key,
@@ -173,24 +174,22 @@ async def _handle_new_subscription(query, context, user_id: int) -> int:
             traceback.print_exc()
             await safe_edit(query, f"❌ Failed to create pending subscription: {e}")
             return ConversationHandler.END
-
         filter_desc = build_subscription_description(
             provider_str,
             type_str,
             draft.get("volume"),
             draft.get("repeat_interval"),
         )
-
         await safe_edit(
             query,
             f"✅ Subscription request created!\n\n"
             f"Filters: {filter_desc}\n"
             f"Repeat every: {draft['repeat_interval']}s\n\n"
             f"To activate, open the Broadcast Bot with /start or /menu, "
-            f"choose 'Activate Subscription', and enter this key:\n"
-            f"🔑 `{key}`\n\n"
+            f"choose 'Activate Subscription', and enter this 6-digit key using the numeric keypad:\n"
+            f"🔑 {key}\n\n"
             f"(The key is valid for {KEY_EXPIRY_SECONDS} seconds.)",
-            parse_mode="Markdown",
+            parse_mode=None,  # Avoid Markdown errors
         )
         clear_draft(context)
         return ConversationHandler.END
