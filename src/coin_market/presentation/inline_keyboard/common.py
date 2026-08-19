@@ -2,14 +2,16 @@
 Common utilities for menu handlers.
 """
 
-from decimal import Decimal
 from typing import cast
-
+from decimal import Decimal
 from telegram import Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 from .menus import build_numeric_keyboard
+
+# ─── Conversation States ─────────────────────────────────────
+SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, SELECT_REPEAT, SELECT_CHAT, CONFIRM, SELECT_EDIT_SUB = range(7)
 
 
 # ─── User Data & Draft Management ─────────────────────────
@@ -70,90 +72,149 @@ async def safe_edit_markup(query, reply_markup) -> None:
 
 # ─── Numeric Keyboard Helpers ─────────────────────────────
 
-async def _update_numeric_display(query, num_buffer: str, num_field: str) -> None:
+async def _update_numeric_display(
+    query,
+    num_buffer: str,
+    num_field: str,
+    include_negative: bool = False,
+) -> None:
     """Update the numeric keypad display."""
     display = num_buffer if num_buffer else " "
     text = f"✏️ Enter {num_field} (number):\n\n{display}\n\n(use the keypad below)"
     await safe_edit(
         query,
         text,
-        reply_markup=build_numeric_keyboard(),
-        parse_mode=None,  # No Markdown to avoid entity parsing errors
+        reply_markup=build_numeric_keyboard(
+            include_negative=include_negative,
+            allow_decimal=(num_field == "volume"),
+        ),
+        parse_mode=None,
     )
 
 
 async def _handle_numeric_backspace(user_data: dict, num_buffer: str, state: int) -> int:
-    """Handle backspace key."""
     num_buffer = num_buffer[:-1]
     user_data["num_buffer"] = num_buffer
     return state
 
 
 async def _handle_numeric_dot(user_data: dict, num_buffer: str, state: int) -> int:
-    """Handle dot key."""
     if "." not in num_buffer:
         num_buffer += "."
     user_data["num_buffer"] = num_buffer
     return state
 
 
+async def _handle_numeric_negative(user_data: dict, num_buffer: str, state: int) -> int:
+    if num_buffer == "":
+        num_buffer = "-"
+    elif num_buffer.startswith("-"):
+        num_buffer = num_buffer[1:]
+    else:
+        num_buffer = "-" + num_buffer
+    user_data["num_buffer"] = num_buffer
+    return state
+
+
 async def _handle_numeric_digit(user_data: dict, num_buffer: str, digit: str, state: int) -> int:
-    """Handle digit key."""
     num_buffer += digit
     user_data["num_buffer"] = num_buffer
     return state
 
 
+# ─── Parse value based on field ────────────────────────────
+
+def _parse_field_value(num_field: str, num_buffer: str) -> tuple[bool, object, str | None]:
+    """Parse the numeric input based on the field type."""
+    match num_field:
+        case "volume":
+            try:
+                value = Decimal(num_buffer)
+                if value <= 0:
+                    return False, None, "Volume must be positive."
+                return True, value, None
+            except ValueError:
+                return False, None, "Invalid number."
+
+        case "repeat":
+            try:
+                value = int(num_buffer)
+                if value <= 0:
+                    return False, None, "Interval must be positive."
+                return True, value, None
+            except ValueError:
+                return False, None, "Invalid number."
+
+        case "chat_id":
+            try:
+                value = int(num_buffer)
+                return True, value, None
+            except ValueError:
+                return False, None, "Invalid number."
+
+        case _:
+            return False, None, "Unknown field."
+
+
+def _set_draft_value(context: ContextTypes.DEFAULT_TYPE, num_field: str, value) -> str | None:
+    """Update the draft with the parsed value. Returns error message or None."""
+    draft = get_draft(context)
+
+    match num_field:
+        case "volume":
+            draft["volume"] = value
+        case "repeat":
+            draft["repeat_interval"] = value
+        case "chat_id":
+            draft["chat_id"] = value
+            draft["chat_method"] = "custom"
+        case _:
+            return "Unknown field."
+
+    return None
+
+
+# ─── Handle confirm ─────────────────────────────────────────
+
 async def _handle_numeric_confirm(
-        query,
-        context: ContextTypes.DEFAULT_TYPE,
-        user_data: dict,
-        num_buffer: str,
-        num_field: str,
-        state: int,
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_data: dict,
+    num_buffer: str,
+    num_field: str,
+    state: int,
 ) -> int:
     """Handle confirm (Next) key."""
-    if not num_buffer:
+    if not num_buffer or num_buffer in ("-", "."):
         await safe_edit(query, "❌ Please enter a number.")
         return state
 
-    try:
-        value = Decimal(num_buffer)
-        if value <= 0:
-            raise ValueError
+    success, value, error = _parse_field_value(num_field, num_buffer)
 
-        draft = get_draft(context)
-        if num_field == "volume":
-            draft["volume"] = value
-        elif num_field == "repeat":
-            draft["repeat_interval"] = int(value)
-        elif num_field == "chat_id":
-            draft["chat_id"] = int(value)
-            draft["chat_method"] = "custom"
-        else:
-            await safe_edit(query, "❌ Unknown field.")
-            return state
-
-        user_data.pop("num_buffer", None)
-        user_data.pop("num_field", None)
-
-        await safe_edit(
-            query,
-            f"✅ {num_field.capitalize()} set to: {value}",
-        )
-        return ConversationHandler.END
-
-    except (ValueError, TypeError):
-        await safe_edit(query, "❌ Invalid number. Please try again.")
+    if not success:
+        await safe_edit(query, f"❌ {error}")
         return state
+
+    error = _set_draft_value(context, num_field, value)
+    if error:
+        await safe_edit(query, f"❌ {error}")
+        return state
+
+    user_data.pop("num_buffer", None)
+    user_data.pop("num_field", None)
+
+    await safe_edit(
+        query,
+        f"✅ {num_field.capitalize()} set to: {num_buffer}",
+    )
+    return ConversationHandler.END
 
 
 async def _handle_numeric_back(
-        context: ContextTypes.DEFAULT_TYPE,
-        user_data: dict,
-        num_field: str,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_data: dict,
+    num_field: str,
 ) -> int:
-    """Handle back button to return to previous menu."""
     user_data.pop("num_buffer", None)
     user_data.pop("num_field", None)
 
@@ -166,11 +227,13 @@ async def _handle_numeric_back(
 
 # ─── Main Numeric Input Handler ────────────────────────────
 
-async def handle_numeric_input(update: Update, context: ContextTypes.DEFAULT_TYPE, field: str, state: int) -> int:
-    """
-    Generic numeric keypad handler.
-    Routes to specific helpers based on the action.
-    """
+async def handle_numeric_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    field: str,
+    state: int,
+    include_negative: bool = False,
+) -> int:
     query = update.callback_query
     if not query:
         return ConversationHandler.END
@@ -185,23 +248,24 @@ async def handle_numeric_input(update: Update, context: ContextTypes.DEFAULT_TYP
     num_buffer = user_data.get("num_buffer", "")
     num_field = user_data.get("num_field", field)
 
-    # ─── Route to specific handler ──────────────────────────
-    if action == "backspace":
-        result = await _handle_numeric_backspace(user_data, num_buffer, state)
-    elif action == ".":
-        result = await _handle_numeric_dot(user_data, num_buffer, state)
-    elif action == "next":
-        result = await _handle_numeric_confirm(query, context, user_data, num_buffer, num_field, state)
-    elif action == "back":
-        result = await _handle_numeric_back(context, user_data, num_field)
-    elif action.isdigit():
-        result = await _handle_numeric_digit(user_data, num_buffer, action, state)
-    else:
-        return state
+    match action:
+        case "backspace":
+            result = await _handle_numeric_backspace(user_data, num_buffer, state)
+        case ".":
+            result = await _handle_numeric_dot(user_data, num_buffer, state)
+        case "negative":
+            result = await _handle_numeric_negative(user_data, num_buffer, state)
+        case "next":
+            result = await _handle_numeric_confirm(query, context, user_data, num_buffer, num_field, state)
+        case "back":
+            result = await _handle_numeric_back(context, user_data, num_field)
+        case _ if action.isdigit():
+            result = await _handle_numeric_digit(user_data, num_buffer, action, state)
+        case _:
+            return state
 
-    # ─── Update display if we're still in the numeric state ──
     if result == state:
         updated_buffer = user_data.get("num_buffer", "")
-        await _update_numeric_display(query, updated_buffer, num_field)
+        await _update_numeric_display(query, updated_buffer, num_field, include_negative)
 
     return result

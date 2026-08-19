@@ -63,22 +63,47 @@ async def pause_subscription_by_id(sub_id: int, user_id: int) -> int:
         result = await session.execute(
             update(Subscription)
             .where(and_(Subscription.id == sub_id, Subscription.user_id == user_id))
-            .values(status="paused", updated_at=datetime.now())
+            .values(status="paused", updated_at=datetime.now(TIMEZONE))
         )
         await session.commit()
         return result.rowcount
 
 
 async def resume_subscription_by_id(sub_id: int, user_id: int) -> int:
-    """
-    Resume a paused subscription (set status to 'active').
-    Returns number of affected rows.
-    """
+    """Resume a paused subscription (set status to 'active')."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             update(Subscription)
             .where(and_(Subscription.id == sub_id, Subscription.user_id == user_id, Subscription.status == "paused"))
-            .values(status="active", updated_at=datetime.now())
+            .values(status="active", updated_at=datetime.now(TIMEZONE))
+        )
+        await session.commit()
+        return result.rowcount
+
+
+async def update_subscription_by_id(
+        sub_id: int,
+        user_id: int,
+        provider: str | None = None,
+        type_filter: str | None = None,
+        volume: Decimal | None = None,
+        repeat_interval: int | None = None,
+) -> int:
+    """
+    Update a subscription's filters.
+    Returns number of affected rows (0 if not found or not owned by user).
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(Subscription)
+            .where(and_(Subscription.id == sub_id, Subscription.user_id == user_id))
+            .values(
+                provider=provider,
+                type_filter=type_filter,
+                volume=volume,
+                repeat_interval=repeat_interval,
+                updated_at=datetime.now(TIMEZONE),
+            )
         )
         await session.commit()
         return result.rowcount

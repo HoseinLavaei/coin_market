@@ -110,9 +110,14 @@ def build_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-def build_numeric_keyboard() -> InlineKeyboardMarkup:
+def build_numeric_keyboard(
+        include_negative: bool = False,
+        allow_decimal: bool = False,
+) -> InlineKeyboardMarkup:
     """
     Build a numeric keypad with digits, dot, backspace, next, back, cancel.
+    - include_negative: adds a '-' button (used for chat_id).
+    - allow_decimal: adds a '.' button (used for volume).
     """
     buttons = []
     # First three rows: 1-9
@@ -122,12 +127,15 @@ def build_numeric_keyboard() -> InlineKeyboardMarkup:
             row.append(InlineKeyboardButton(str(j), callback_data=f"num:{j}"))
         buttons.append(row)
 
-    # Row 4: dot, 0, backspace
-    buttons.append([
-        InlineKeyboardButton(".", callback_data="num:."),
-        InlineKeyboardButton("0", callback_data="num:0"),
-        InlineKeyboardButton("⌫", callback_data="num:backspace"),
-    ])
+    # Row 4: dynamic buttons
+    row4 = []
+    if include_negative:
+        row4.append(InlineKeyboardButton("±", callback_data="num:negative"))
+    if allow_decimal:
+        row4.append(InlineKeyboardButton(".", callback_data="num:."))
+    row4.append(InlineKeyboardButton("0", callback_data="num:0"))
+    row4.append(InlineKeyboardButton("⌫", callback_data="num:backspace"))
+    buttons.append(row4)
 
     # Row 5: Cancel, Back, Next
     buttons.append([
