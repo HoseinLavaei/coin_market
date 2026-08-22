@@ -1,6 +1,6 @@
 """
 Conversation logic for Control Bot menus.
-Uses builders from .menus and handlers from selection_handlers, volume_handler, repeat_handler, chat_handler, confirm_handler,
+Uses builders from .menus and handlers from selection_handlers, volume_handler, repeat_handler, confirm_handler,
 stop_handler, resume_handler, edit_handler, delete_handler, help_handler.
 Entry point: /start
 """
@@ -8,53 +8,31 @@ Entry point: /start
 from telegram import Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ConversationHandler
 
-from .chat_handler import (
-    show_chat,
-    chat_callback,
-    numeric_callback as chat_numeric_callback,
-)
-from .common import safe_edit, get_draft, clear_draft, get_user_data, SELECT_EDIT_SUB
-from .confirm_handler import (
-    confirm_callback,
-)
-from .delete_handler import (
-    delete_subscription_menu,
-    delete_callback,
-    delete_confirm_callback,
-    SELECT_DELETE_SUB,
-    CONFIRM_DELETE,
-)
-from .edit_handler import (
-    edit_subscription_menu,
-    edit_selection_callback,
-)
-from .help_handler import (
-    show_help,
-)
 from .menus import (
     build_control_main_menu,
     SELECT_PROVIDER,
     SELECT_TYPE,
     SELECT_VOLUME,
     SELECT_REPEAT,
-    SELECT_CHAT,
     CONFIRM,
+)
+from .common import safe_edit, get_draft, clear_draft, get_user_data, SELECT_EDIT_SUB
+from .selection_handlers import (
+    show_selection,
+    selection_callback,
+)
+from .volume_handler import (
+    show_volume,
+    volume_callback,
+    numeric_callback as volume_numeric_callback,
 )
 from .repeat_handler import (
     show_repeat,
     repeat_callback,
     numeric_callback as repeat_numeric_callback,
 )
-from .resume_handler import (
-    resume_subscription_menu,
-    resume_callback,
-    resume_confirm_callback,
-    SELECT_RESUME_SUB,
-    CONFIRM_RESUME,
-)
-from .selection_handlers import (
-    show_selection,
-    selection_callback,
+from .confirm_handler import (
+    confirm_callback,
 )
 from .stop_handler import (
     stop_subscription_menu,
@@ -63,13 +41,29 @@ from .stop_handler import (
     SELECT_STOP_SUB,
     CONFIRM_STOP,
 )
-from .volume_handler import (
-    show_volume,
-    volume_callback,
-    numeric_callback as volume_numeric_callback,
+from .resume_handler import (
+    resume_subscription_menu,
+    resume_callback,
+    resume_confirm_callback,
+    SELECT_RESUME_SUB,
+    CONFIRM_RESUME,
 )
-from ...domain.value_objects import build_subscription_description
+from .edit_handler import (
+    edit_subscription_menu,
+    edit_selection_callback,
+)
+from .delete_handler import (
+    delete_subscription_menu,
+    delete_callback,
+    delete_confirm_callback,
+    SELECT_DELETE_SUB,
+    CONFIRM_DELETE,
+)
+from .help_handler import (
+    show_help,
+)
 from ...infrastructure.repositories import get_subscriptions_for_user
+from ...domain.value_objects import build_subscription_description
 
 
 # ─── Numeric Callback Wrappers ─────────────────────────────
@@ -89,15 +83,6 @@ async def repeat_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_T
         query = update.callback_query
         if query:
             return await show_repeat(query, context)
-    return result
-
-
-async def chat_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    result = await chat_numeric_callback(update, context)
-    if result == ConversationHandler.END:
-        query = update.callback_query
-        if query:
-            return await show_chat(query, context)
     return result
 
 
@@ -208,7 +193,7 @@ control_conversation = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(main_menu_callback, pattern="^main:"),
         CommandHandler("start", show_main_menu),
-        CommandHandler("menu", show_main_menu),  # Added this line
+        CommandHandler("menu", show_main_menu),
     ],
     states={
         SELECT_PROVIDER: [
@@ -230,10 +215,6 @@ control_conversation = ConversationHandler(
         SELECT_REPEAT: [
             CallbackQueryHandler(repeat_callback, pattern="^rep:"),
             CallbackQueryHandler(repeat_numeric_wrapper, pattern="^num:"),
-        ],
-        SELECT_CHAT: [
-            CallbackQueryHandler(chat_callback, pattern="^chat:"),
-            CallbackQueryHandler(chat_numeric_wrapper, pattern="^num:"),
         ],
         CONFIRM: [
             CallbackQueryHandler(confirm_callback, pattern="^confirm:"),

@@ -7,12 +7,71 @@ from ...domain import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order,
 
 
 class ExirProvider:
-    """Fetches order book data from Exir exchange. OTC is not supported."""
+    """Fetches OTC and order book data from Exir exchange."""
     provider_name = ProviderName.EXIR
 
     @classmethod
-    async def get_otc(cls, _quotes: list[Quote], _bases: list[Base]) -> Coins:
-        return Coins()
+    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
+        """
+        Fetch OTC prices from Exir.
+        Endpoint: https://api.exir.io/v2/oracle/prices?amount=1&quote=irt&assets=usdt
+        Response: {"usdt": 188361000}
+        """
+        result = Coins()
+        semaphore = asyncio.Semaphore(5)
+
+        async def fetch_otc(quote: Quote, base: Base):
+            # Map quote to Exir's format
+            quote_str = "irt" if quote == Quote.TMN else "usdt" if quote == Quote.USD else None
+            if quote_str is None:
+                return None
+
+            # Map base to Exir's format (lowercase)
+            base_str = base.value.lower()
+
+            params = {
+                "amount": "1",
+                "quote": quote_str,
+                "assets": base_str,
+            }
+
+            async with semaphore:
+                try:
+                    data = await get_json("https://api.exir.io/v2/oracle/prices", params=params)
+                except (OSError, ValueError, TimeoutError):
+                    return None
+
+                # Response is like: {"usdt": 188361000}
+                # The key is the asset name, the value is the price in the quote currency (IRT or USD)
+                price_value = data.get(base_str)
+                if price_value is None:
+                    return None
+
+                # The price returned is in the quote currency (e.g., IRT for 1 USDT)
+                # For buy and sell, we use the same price (or adjust if Exir has spread)
+                price = Decimal(str(price_value))
+
+                the_coin = Coin(
+                    provider=cls.provider_name,
+                    base=base,
+                    quote=quote,
+                    raw_buy_price=price,
+                    raw_sell_price=price,
+                    buy_fee=Decimal("0.12"),
+                    sell_fee=Decimal("0.12"),
+                    timestamp=datetime.datetime.now(datetime.timezone.utc),
+                )
+                return (quote, base), the_coin
+
+        tasks = [fetch_otc(quote, base) for quote in quotes for base in bases]
+        results = await asyncio.gather(*tasks)
+
+        for r in results:
+            if r is not None:
+                _, coin = r
+                result.upsert(coin)
+
+        return result
 
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:

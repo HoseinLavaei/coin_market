@@ -6,12 +6,12 @@ Single‑select from presets or custom numeric input.
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_draft, clear_draft, handle_numeric_input, get_user_data
 from .menus import (
     build_repeat_keyboard,
     build_numeric_keyboard,
     SELECT_REPEAT,
 )
+from .common import safe_edit, get_draft, clear_draft, handle_numeric_input, get_user_data
 
 
 async def show_repeat(query, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -71,7 +71,7 @@ async def handle_repeat_custom(query, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def handle_repeat_next(query, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle next button for repeat selection."""
+    """Handle next button – go to confirm (no chat selection)."""
     draft = get_draft(context)
     if draft.get("repeat_interval") is None:
         await safe_edit(
@@ -80,9 +80,9 @@ async def handle_repeat_next(query, context: ContextTypes.DEFAULT_TYPE) -> int:
             reply_markup=build_repeat_keyboard(None),
         )
         return SELECT_REPEAT
-    # ─── Move to chat selection ──────────────────────
-    from .chat_handler import show_chat
-    return await show_chat(query, context)
+    # ─── Go directly to confirm ──────────────────────────────
+    from .confirm_handler import show_confirm
+    return await show_confirm(query, context)
 
 
 async def handle_repeat_back(query, context: ContextTypes.DEFAULT_TYPE) -> int:

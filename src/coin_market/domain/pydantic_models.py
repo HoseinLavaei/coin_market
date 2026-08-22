@@ -39,7 +39,7 @@ class Coin(BaseModel):
 
     def __str__(self) -> str:
         buy_str, sell_str = self.get_formatted_price()
-        return f"🟢 : {buy_str} 🔴 : {sell_str}"
+        return f"🟢 {buy_str} 🔴 {sell_str}"
 
     def to_timezone(self) -> "Coin":
         """Convert timestamp to the project's configured timezone."""

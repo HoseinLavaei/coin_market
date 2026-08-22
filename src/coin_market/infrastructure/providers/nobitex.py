@@ -75,7 +75,7 @@ class NobitexProvider:
 
             async with semaphore:
                 try:
-                    data = await get_json(f"https://apiv2.nobitex.ir/v3/orderbook/{pair}")
+                    data = await get_json(f"https://apiv2.nobitex.ir/v2/depth/{pair}")
                     if data.get("status") != "ok":
                         return None
 

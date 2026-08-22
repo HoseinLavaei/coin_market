@@ -64,7 +64,7 @@ class OmpfinexProvider:
     async def _fetch_single_orderbook(cls, semaphore: asyncio.Semaphore, mid: int, b: Base, q: Quote):
         async with semaphore:
             try:
-                data = await get_json(f"https://api.ompfinex.com/v1/market/{mid}/depth", {"limit": "200"})
+                data = await get_json(f"https://api.ompfinex.com/v1/market/{mid}/depth", {"limit": "1000000"})
             except (OSError, ValueError, TimeoutError):
                 return None
 

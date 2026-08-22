@@ -125,11 +125,11 @@ def _format_best_summary(
     if best_buy is not None:
         coin, provider, typ = best_buy
         buy_str, _ = coin.get_formatted_price()
-        lines.append(f"    🟢 : {buy_str} ({provider.value}, {typ})")
+        lines.append(f"    🟢 {buy_str} ({provider.value}, {typ})")
     if best_sell is not None:
         coin, provider, typ = best_sell
         _, sell_str = coin.get_formatted_price()
-        lines.append(f"    🔴 : {sell_str} ({provider.value}, {typ})")
+        lines.append(f"    🔴 {sell_str} ({provider.value}, {typ})")
 
     return "\n".join(lines)
 

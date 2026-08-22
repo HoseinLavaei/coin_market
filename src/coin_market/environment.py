@@ -28,3 +28,5 @@ if not DATABASE_URL:
 
 # Timezone used for all timestamps and display
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
+# Telegram bot username (without @)
+BROADCAST_BOT_USERNAME = os.getenv("BROADCAST_BOT_USERNAME", "coin_market_monitor_bot")

@@ -1,6 +1,7 @@
 """
 Confirm selection handler.
 Shows a summary of all selections and allows confirmation.
+Only key‑based activation is supported (no custom chat ID).
 """
 
 import secrets
@@ -16,18 +17,12 @@ from .menus import (
     CONFIRM,
 )
 from ...domain.value_objects import build_subscription_description
-from ...environment import KEY_EXPIRY_SECONDS, TIMEZONE
+from ...environment import KEY_EXPIRY_SECONDS, TIMEZONE, BROADCAST_BOT_USERNAME
 from ...infrastructure.repositories import (
-    add_subscription,
     create_pending_subscription,
     update_subscription_by_id,
 )
-from ...services.subscription_scheduler import (
-    schedule_subscription_job,
-    get_job_queue,
-    send_market_data,
-    reload_subscriptions_immediate,
-)
+from ...services.subscription_scheduler import reload_subscriptions_immediate
 
 
 # ─── Show confirm screen ─────────────────────────────────────
@@ -46,18 +41,9 @@ async def show_confirm(query, context: ContextTypes.DEFAULT_TYPE) -> int:
         draft.get("repeat_interval"),
     )
 
-    chat_method = draft.get("chat_method")
-    if chat_method == "custom":
-        chat_info = f"Chat ID: {draft.get('chat_id')}"
-    elif chat_method == "key":
-        chat_info = "Key-based activation"
-    else:
-        chat_info = "Not set"
-
     text = (
         "📋 **Confirm Subscription**\n\n"
         f"{summary}\n\n"
-        f"📨 {chat_info}\n\n"
         "Review your selections and confirm:"
     )
 
@@ -96,103 +82,58 @@ async def _handle_edit_subscription(query, context, user_id: int) -> int:
     return ConversationHandler.END
 
 
-# ─── Create new subscription ─────────────────────────────────
+# ─── Create new subscription (key only) ─────────────────────
 
 async def _handle_new_subscription(query, context, user_id: int) -> int:
-    """Create a new subscription (direct or key-based)."""
+    """Create a key‑based pending subscription."""
     draft = get_draft(context)
 
     provider_str = ",".join(draft.get("providers", [])) if draft.get("providers") else None
     type_str = ",".join(draft.get("types", [])) if draft.get("types") else None
-    chat_method = draft.get("chat_method")
 
-    if chat_method == "custom":
-        chat_id = draft.get("chat_id")
-        if not isinstance(chat_id, int):
-            await safe_edit(query, "❌ Invalid chat ID.")
-            return ConversationHandler.END
+    # ─── Generate 6-digit numeric key ───────────────────────
+    key = str(secrets.randbelow(1000000)).zfill(6)
+    expires_at = datetime.now(TIMEZONE) + timedelta(seconds=KEY_EXPIRY_SECONDS)
 
-        # ─── Create subscription ──────────────────────────────
-        try:
-            sub = await add_subscription(
-                chat_id=chat_id,
-                user_id=user_id,
-                provider=provider_str,
-                type_filter=type_str,
-                volume=draft.get("volume"),
-                repeat_interval=draft.get("repeat_interval"),
-            )
-        except Exception as e:
-            traceback.print_exc()
-            await safe_edit(query, f"❌ Failed to add subscription: {e}")
-            return ConversationHandler.END
-
-        # ─── Schedule job ─────────────────────────────────────
-        try:
-            job_queue = get_job_queue()
-            if job_queue is None:
-                await safe_edit(query, "❌ Job queue not available.")
-                return ConversationHandler.END
-
-            schedule_subscription_job(job_queue, sub)
-
-            # ─── Send first update ────────────────────────────
-            dummy_context = type('DummyContext', (), {'bot': query.bot})()
-            await send_market_data(
-                chat_id=chat_id,
-                context=dummy_context,
-                provider=provider_str,
-                type_filter=type_str,
-                volume=draft.get("volume"),
-                is_auto=True,
-            )
-        except Exception as e:
-            traceback.print_exc()
-            await safe_edit(query, f"⚠️ Subscription created but scheduling failed: {e}")
-            return ConversationHandler.END
-
-        await safe_edit(query, "✅ Subscription activated! First update sent.")
-        clear_draft(context)
+    try:
+        await create_pending_subscription(
+            key=key,
+            user_id=user_id,
+            provider=provider_str,
+            type_filter=type_str,
+            volume=draft.get("volume"),
+            repeat_interval=draft.get("repeat_interval"),
+            expires_at=expires_at,
+        )
+    except Exception as e:
+        traceback.print_exc()
+        await safe_edit(query, f"❌ Failed to create pending subscription: {e}")
         return ConversationHandler.END
 
+    filter_desc = build_subscription_description(
+        provider_str,
+        type_str,
+        draft.get("volume"),
+        draft.get("repeat_interval"),
+    )
 
-    else:
-        # ─── Key-based activation with 6-digit numeric key ───────
-        key = str(secrets.randbelow(1000000)).zfill(6)
-        expires_at = datetime.now(TIMEZONE) + timedelta(seconds=KEY_EXPIRY_SECONDS)
-        try:
-            await create_pending_subscription(
-                key=key,
-                user_id=user_id,
-                provider=provider_str,
-                type_filter=type_str,
-                volume=draft.get("volume"),
-                repeat_interval=draft.get("repeat_interval"),
-                expires_at=expires_at,
-            )
-        except Exception as e:
-            traceback.print_exc()
-            await safe_edit(query, f"❌ Failed to create pending subscription: {e}")
-            return ConversationHandler.END
-        filter_desc = build_subscription_description(
-            provider_str,
-            type_str,
-            draft.get("volume"),
-            draft.get("repeat_interval"),
-        )
-        await safe_edit(
-            query,
-            f"✅ Subscription request created!\n\n"
-            f"Filters: {filter_desc}\n"
-            f"Repeat every: {draft['repeat_interval']}s\n\n"
-            f"To activate, open the Broadcast Bot with /start or /menu, "
-            f"choose 'Activate Subscription', and enter this 6-digit key using the numeric keypad:\n"
-            f"🔑 {key}\n\n"
-            f"(The key is valid for {KEY_EXPIRY_SECONDS} seconds.)",
-            parse_mode=None,  # Avoid Markdown errors
-        )
-        clear_draft(context)
-        return ConversationHandler.END
+    # ─── Build activation link ──────────────────────────────
+    link = f"https://t.me/{BROADCAST_BOT_USERNAME}?start={key}"
+
+    await safe_edit(
+        query,
+        f"✅ Subscription request created!\n\n"
+        f"Filters: {filter_desc}\n"
+        f"Repeat every: {draft['repeat_interval']}s\n\n"
+        f"To activate, click this link:\n"
+        f"👉 {link}\n\n"
+        f"Or open the Broadcast Bot with /start or /menu and enter the key manually:\n"
+        f"🔑 {key}\n\n"
+        f"(The key is valid for {KEY_EXPIRY_SECONDS} seconds.)",
+        parse_mode=None,
+    )
+    clear_draft(context)
+    return ConversationHandler.END
 
 
 # ─── Confirm callback handlers ──────────────────────────────
@@ -219,9 +160,9 @@ async def handle_confirm_next(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def handle_confirm_back(query, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle back button to return to chat selection."""
-    from .chat_handler import show_chat
-    return await show_chat(query, context)
+    """Handle back button to return to repeat selection."""
+    from .repeat_handler import show_repeat
+    return await show_repeat(query, context)
 
 
 async def handle_confirm_cancel(query, context: ContextTypes.DEFAULT_TYPE) -> int:
