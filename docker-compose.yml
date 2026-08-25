@@ -1,4 +1,31 @@
 services:
+  # ─── Redis (Celery broker) ────────────────────────────────
+  redis:
+    image: redis:alpine
+    container_name: coin-market-redis
+    ports:
+      - "6379:6379"
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  # ─── Database ──────────────────────────────────────────────
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: coin-market-db
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-password}
+      - POSTGRES_DB=${DB_NAME:-coin_market}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    stop_grace_period: 60s
+    restart: always
+
+  # ─── Main Bot (Control + Broadcast) ────────────────────────
   bot:
     build: .
     container_name: coin-market-bot
@@ -6,22 +33,50 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://localhost:6379/0
     depends_on:
       - db
+      - redis
     restart: always
     network_mode: host
     stop_grace_period: 60s
-  db:
-    image: timescale/timescaledb:latest-pg16
-    container_name: coin-market-db
+
+  # ─── Celery Worker ──────────────────────────────────────────
+  celery_worker:
+    build: .
+    container_name: coin-market-celery-worker
+    env_file:
+      - .env
     environment:
-      - POSTGRES_USER=${DB_USER:-postgres}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-password}
-      - POSTGRES_DB=${DB_NAME:-coin_market_OLD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://localhost:6379/0
+      - PYTHONPATH=/app
+    depends_on:
+      - db
+      - redis
+    restart: always
+    network_mode: host
+    command: celery -A scheduler.celery_app worker --loglevel=info
     stop_grace_period: 60s
+
+  # ─── Celery Beat (scheduler) ──────────────────────────────
+  celery_beat:
+    build: .
+    container_name: coin-market-celery-beat
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://localhost:6379/0
+      - PYTHONPATH=/app
+    depends_on:
+      - db
+      - redis
+    restart: always
+    network_mode: host
+    command: celery -A scheduler.celery_app beat --loglevel=info
+    stop_grace_period: 60s
+
 volumes:
   postgres_data:
+  redis_data:
