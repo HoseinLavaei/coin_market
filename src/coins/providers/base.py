@@ -2,7 +2,8 @@ from typing import Protocol, runtime_checkable
 
 import httpx
 
-from .. import ProviderName, Quote, Base, OrderBooks, Coins
+from ..enums import ProviderName, Quote, Base
+from ..models import OrderBooks, Coins
 
 
 async def get_json(url: str, params: dict[str, str] | None = None) -> dict:

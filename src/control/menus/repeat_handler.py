@@ -23,7 +23,7 @@ async def show_repeat(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     current: int | None = draft.get("repeat_interval")
 
     if current is not None:
-        label = f"{current}sm"
+        label = f"{current}m"
         text = f"⏱️ Selected interval: {label}\n\nSelect interval (or use Custom):"
     else:
         text = "⏱️ Select interval (or use Custom):"

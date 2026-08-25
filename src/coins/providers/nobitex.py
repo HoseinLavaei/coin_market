@@ -3,7 +3,8 @@ import datetime
 from decimal import Decimal
 
 from .base import get_json
-from .. import Coin, Quote, Base, Coins, OrderBooks, ProviderName, Order, OrderBook
+from ..enums import ProviderName, Quote, Base
+from ..models import OrderBooks, Coins, Coin, Order, OrderBook
 
 
 class NobitexProvider:

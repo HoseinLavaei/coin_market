@@ -1,8 +1,8 @@
 """
 Confirm selection handler.
-Shows a summary of all selections and allows confirmation.
-- If user has existing subscription: updates it directly (no key).
-- If user has no subscription: generates a key + pending subscription.
+Shows a summary of all selections and confirms.
+- If user has an active subscription (chat_id NOT NULL): updates it directly.
+- Otherwise: generates a key + pending subscription.
 """
 
 import secrets
@@ -18,9 +18,9 @@ from .menus import build_confirm_keyboard
 from .repeat_handler import show_repeat
 from ...coins import build_subscription_description
 from ...db import (
-    get_subscription_for_user,
-    add_or_replace_subscription,
-    create_pending_subscription,
+    get_active_subscription_for_user,
+    update_active_subscription,
+    create_or_replace_pending,
 )
 from ...environment import KEY_EXPIRY_SECONDS, TIMEZONE, BROADCAST_BOT_USERNAME
 
@@ -61,7 +61,7 @@ async def _handle_back(query, context) -> int:
     return await show_repeat(query, context)
 
 
-async def _handle_update_existing(
+async def _handle_existing_active(
         query,
         context,
         user_id: int,
@@ -70,22 +70,17 @@ async def _handle_update_existing(
         volume: Decimal | None,
         repeat_interval: int,
 ) -> int:
-    existing = await get_subscription_for_user(user_id)
-    if existing is None:
-        return await _handle_new_subscription(query, context, user_id, provider_str, type_str, volume, repeat_interval)
-
+    """Update an existing active subscription directly."""
     try:
-        await add_or_replace_subscription(
+        await update_active_subscription(
             user_id=user_id,
-            chat_id=existing.chat_id,
             provider=provider_str,
             type_filter=type_str,
             volume=volume,
             repeat_interval=repeat_interval,
         )
         clear_draft(context)
-        await safe_edit(query,
-                        "✅ Subscription updated successfully! The first update will be sent within the next minute.")
+        await safe_edit(query, "✅ Subscription updated successfully! The first update will be sent within the next minute.")
         return ConversationHandler.END
     except Exception as e:
         traceback.print_exc()
@@ -93,7 +88,7 @@ async def _handle_update_existing(
         return ConversationHandler.END
 
 
-async def _handle_new_subscription(
+async def _create_and_show_pending(
         query,
         context,
         user_id: int,
@@ -102,17 +97,18 @@ async def _handle_new_subscription(
         volume: Decimal | None,
         repeat_interval: int,
 ) -> int:
+    """Generate a key, create/replace pending subscription, and show activation link."""
     key = str(secrets.randbelow(1000000)).zfill(6)
     expires_at: int = int((datetime.now(TIMEZONE) + timedelta(seconds=KEY_EXPIRY_SECONDS)).timestamp())
 
     try:
-        await create_pending_subscription(
-            key=key,
+        await create_or_replace_pending(
             user_id=user_id,
             provider=provider_str,
             type_filter=type_str,
             volume=volume,
             repeat_interval=repeat_interval,
+            key=key,
             expires_at=expires_at,
         )
     except Exception as e:
@@ -139,7 +135,45 @@ async def _handle_new_subscription(
     return ConversationHandler.END
 
 
-# ─── Main callback ────────────────────────────────────────────
+async def _handle_next(query, context, user_id: int, draft: dict) -> int:
+    """
+    Handle the 'Next' action from the confirmation menu.
+    Checks if the user has an active subscription and routes accordingly.
+    """
+    provider_str = ",".join(draft.get("providers", [])) if draft.get("providers") else None
+    type_str = ",".join(draft.get("types", [])) if draft.get("types") else None
+    repeat_interval = draft.get("repeat_interval")
+    volume = draft.get("volume")
+
+    if not isinstance(repeat_interval, int):
+        await safe_edit(query, "❌ Invalid interval.")
+        return ConversationHandler.END
+
+    existing_active = await get_active_subscription_for_user(user_id)
+
+    if existing_active:
+        return await _handle_existing_active(
+            query,
+            context,
+            user_id,
+            provider_str,
+            type_str,
+            volume,
+            repeat_interval,
+        )
+    else:
+        return await _create_and_show_pending(
+            query,
+            context,
+            user_id,
+            provider_str,
+            type_str,
+            volume,
+            repeat_interval,
+        )
+
+
+# ─── Main callback (now a simple router) ─────────────────────
 
 async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle confirm selection interactions."""
@@ -148,19 +182,12 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
 
     await query.answer()
-    data = query.data
-    if not data:
-        return CONFIRM
 
-    if not data.startswith("confirm:"):
+    data = query.data
+    if not data or not data.startswith("confirm:"):
         return CONFIRM
 
     action = data.split(":", 1)[1]
-    draft = get_draft(context)
-    user = update.effective_user
-    if not user:
-        await safe_edit(query, "❌ Could not identify user.")
-        return ConversationHandler.END
 
     if action == "cancel":
         return await _handle_cancel(query, context)
@@ -169,23 +196,11 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return await _handle_back(query, context)
 
     if action == "next":
-        provider_str = ",".join(draft.get("providers", [])) if draft.get("providers") else None
-        type_str = ",".join(draft.get("types", [])) if draft.get("types") else None
-        repeat_interval = draft.get("repeat_interval")
-        volume = draft.get("volume")
-
-        if not isinstance(repeat_interval, int):
-            await safe_edit(query, "❌ Invalid interval.")
+        user = update.effective_user
+        if not user:
+            await safe_edit(query, "❌ Could not identify user.")
             return ConversationHandler.END
-
-        return await _handle_update_existing(
-            query,
-            context,
-            user.id,
-            provider_str,
-            type_str,
-            volume,
-            repeat_interval,
-        )
+        draft = get_draft(context)
+        return await _handle_next(query, context, user.id, draft)
 
     return CONFIRM

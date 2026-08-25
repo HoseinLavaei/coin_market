@@ -2,7 +2,8 @@ import datetime
 from decimal import Decimal
 
 from .base import get_json
-from .. import Coin, Quote, Base, Coins, OrderBooks, ProviderName
+from ..enums import ProviderName, Quote, Base
+from ..models import OrderBooks, Coins, Coin
 
 
 class AbanTetherProvider:

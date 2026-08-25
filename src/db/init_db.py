@@ -1,5 +1,5 @@
 """
-Database initialisation: creates only subscriptions and pending_subscriptions tables if they don't exist.
+Database initialisation: creates the unified subscriptions table if it doesn't exist.
 """
 
 import urllib.parse
@@ -21,49 +21,31 @@ async def init_db():
         conn = await asyncpg.connect(host=host, port=port, user=user, password=password, database=database)
 
         try:
-            # ─── Subscriptions table ────────────────────────────────
-            # Drop and recreate to ensure clean schema
-            await conn.execute("DROP TABLE IF EXISTS subscriptions CASCADE")
+            # Create unified subscriptions table if not exists
             await conn.execute("""
-                               CREATE TABLE subscriptions
-                               (
-                                   id              SERIAL PRIMARY KEY,
-                                   user_id         BIGINT  NOT NULL UNIQUE,
-                                   chat_id         BIGINT  NOT NULL UNIQUE,
-                                   provider        VARCHAR,
-                                   type_filter     VARCHAR,
-                                   volume          DECIMAL,
-                                   repeat_interval INTEGER NOT NULL,
-                                   last_sent_at    BIGINT,
-                                   created_at      TIMESTAMPTZ DEFAULT NOW(),
-                                   updated_at      TIMESTAMPTZ DEFAULT NOW()
-                               )
-                               """)
-            print("subscriptions table ready")
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id              SERIAL PRIMARY KEY,
+                    user_id         BIGINT  NOT NULL UNIQUE,
+                    chat_id         BIGINT,                         -- NULL = pending
+                    provider        VARCHAR,
+                    type_filter     VARCHAR,
+                    volume          DECIMAL,
+                    repeat_interval INTEGER NOT NULL,
+                    last_sent_at    BIGINT,                         -- minutes since epoch
+                    activation_key  TEXT UNIQUE,                    -- NULL when active
+                    expires_at      BIGINT,                         -- seconds since epoch, NULL when active
+                    created_at      TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            print("Unified subscriptions table ready (created if not existed)")
 
-            # ─── Pending subscriptions table ─────────────────────────
-            await conn.execute("DROP TABLE IF EXISTS pending_subscriptions CASCADE")
-            await conn.execute("""
-                               CREATE TABLE pending_subscriptions
-                               (
-                                   key             TEXT PRIMARY KEY,
-                                   user_id         BIGINT  NOT NULL,
-                                   provider        VARCHAR,
-                                   type_filter     VARCHAR,
-                                   volume          DECIMAL,
-                                   repeat_interval INTEGER NOT NULL,
-                                   chat_id         BIGINT,
-                                   status          VARCHAR     DEFAULT 'pending',
-                                   expires_at      BIGINT  NOT NULL,
-                                   created_at      TIMESTAMPTZ DEFAULT NOW()
-                               )
-                               """)
-            print("pending_subscriptions table ready")
-
-            # ─── Indexes ──────────────────────────────────────────────
+            # Indexes – create if not exist
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)")
-            print("indexes ready")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_activation_key ON subscriptions (activation_key)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_last_sent_at ON subscriptions (last_sent_at)")
+            print("Indexes ready")
 
         finally:
             await conn.close()
