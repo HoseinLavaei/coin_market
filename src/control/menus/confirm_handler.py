@@ -16,7 +16,6 @@ from telegram.ext import ContextTypes, ConversationHandler
 from .common import safe_edit, get_draft, clear_draft, CONFIRM
 from .menus import build_confirm_keyboard
 from .repeat_handler import show_repeat
-from ...coins import build_subscription_description
 from ...db import (
     get_active_subscription_for_user,
     update_active_subscription,
@@ -24,6 +23,30 @@ from ...db import (
 )
 from ...environment import KEY_EXPIRY_SECONDS, TIMEZONE, BROADCAST_BOT_USERNAME
 
+
+def build_subscription_description(provider, type_filter, volume, repeat_interval) -> str:
+
+    parts = []
+    if provider:
+        if "," in provider:
+            provider_names = provider.split(",")
+            parts.append(f"🏛️ providers={', '.join(provider_names)}")
+        else:
+            parts.append(f"🏛️ provider={provider}")
+
+    if type_filter:
+        if "," in type_filter:
+            type_names = type_filter.split(",")
+            parts.append(f"📊 types={', '.join(type_names)}")
+        else:
+            parts.append(f"📊 type={type_filter}")
+
+    if volume is not None:
+        parts.append(f"📦 volume={volume}")
+    if repeat_interval is not None:
+        parts.append(f"⏱️ repeat={repeat_interval}m")
+
+    return " + ".join(parts) if parts else "📊 all data"
 
 async def show_confirm(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display confirmation menu with subscription summary."""

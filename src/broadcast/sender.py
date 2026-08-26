@@ -9,7 +9,7 @@ from ..coins import build_prices_output, build_subscription_description
 from ..environment import BROADCAST_BOT_TOKEN
 
 
-async def send_to_subscription(sub, coins, orderbooks, updated_at):
+async def send_to_subscription(sub, coins, orderbooks):
     """
     Send a market data update to a subscription.
     Uses the Telegram Bot API directly with BROADCAST_BOT_TOKEN.
@@ -18,15 +18,12 @@ async def send_to_subscription(sub, coins, orderbooks, updated_at):
 
     content = build_prices_output(coins, orderbooks, sub.provider, sub.type_filter, sub.volume)
     filter_desc = build_subscription_description(
-        sub.provider,
-        sub.type_filter,
         sub.volume,
         sub.repeat_interval,
     )
-    timestamp = updated_at.strftime('%H:%M:%S')
     msg = (
         f"{content}\n\n"
-        f"🔄 Auto-update ({filter_desc}, 🕒 updated at {timestamp})"
+        f"({filter_desc})"
     )
 
     # ─── Split into chunks if needed ──────────────────────────

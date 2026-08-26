@@ -44,8 +44,6 @@ async def handle_start(update, context):
 
     # ─── Confirm activation ──────────────────────────────────
     filter_desc = build_subscription_description(
-        data["provider"],
-        data["type_filter"],
         data["volume"],
         data["repeat_interval"],
     )

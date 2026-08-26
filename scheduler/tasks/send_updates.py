@@ -3,7 +3,6 @@ Celery task – fetches market data, sends updates to due subscriptions.
 """
 
 import asyncio
-from datetime import datetime
 from types import SimpleNamespace
 
 from celery import shared_task
@@ -11,7 +10,6 @@ from celery import shared_task
 from src.broadcast.sender import send_to_subscription
 from src.coins import fetch_all
 from src.db import get_due_subscriptions_sync, update_last_sent_at_sync
-from src.environment import TIMEZONE
 
 
 @shared_task
@@ -26,8 +24,6 @@ async def _run_send_updates():
 
     # ─── 1. Fetch market data ──────────────────────────────
     coins, orderbooks = await fetch_all()
-    updated_at = datetime.now(TIMEZONE)
-
     # ─── 2. Get due subscriptions (sync DB) ────────────────
     subs = get_due_subscriptions_sync()
     print(f"Found {len(subs)} due subscriptions.")
@@ -40,7 +36,7 @@ async def _run_send_updates():
         sub = SimpleNamespace(**sub_data)
 
         try:
-            await send_to_subscription(sub, coins, orderbooks, updated_at)
+            await send_to_subscription(sub, coins, orderbooks)
             update_last_sent_at_sync(sub.id)
             print(f"Sent update to subscription #{sub.id}")
         except Exception as e:
