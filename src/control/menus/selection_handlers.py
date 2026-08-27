@@ -5,7 +5,7 @@ Selection handlers for provider and type steps.
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_draft, clear_draft, SELECT_PROVIDER, SELECT_TYPE
+from .common import safe_edit, get_draft, SELECT_PROVIDER, SELECT_TYPE
 from .menus import build_provider_keyboard, build_type_keyboard
 from ...coins import ProviderName
 
@@ -20,7 +20,7 @@ def _get_config(prefix: str) -> dict:
             "label": "🏛️ Select providers",
             "all_items": [p.value for p in ProviderName],
             "state": SELECT_PROVIDER,
-            "back_state": None,
+            "back_state": None,   # no back for providers
         }
     elif prefix == "type":
         return {
@@ -112,12 +112,12 @@ async def _handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE, prefi
     if not query:
         return ConversationHandler.END
 
+    # For providers, we don't have back; but we keep for types.
     if prefix == "type":
         return await show_selection(query, context, "prov")
     else:
-        clear_draft(context)
-        await safe_edit(query, "❌ Cancelled.")
-        return ConversationHandler.END
+        # Should not happen because providers have no back button
+        return await show_selection(query, context, "prov")
 
 
 async def _handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
@@ -143,9 +143,21 @@ async def _handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE, prefi
     if prefix == "prov":
         return await show_selection(query, context, "type")
     else:
-        # Lazy import to avoid circular dependency
+        # prefix == "type"
         from .volume_handler import show_volume
         return await show_volume(query, context)
+
+
+async def _handle_done(query, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
+    """Save current selection and return to main menu."""
+    from .control_menus import show_main_menu
+    config = _get_config(prefix)
+    if not config:
+        return ConversationHandler.END
+
+    # The draft already has the selection; just save and go to main menu
+    await safe_edit(query, f"✅ {config['label'].split()[0]} updated.")
+    return await show_main_menu(query, context)
 
 
 # ─── Main callback router ────────────────────────────────────
@@ -180,11 +192,12 @@ async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     prefix, action = parts[0], parts[1]
 
-    # Cancel is global
+    # Cancel is handled globally by fallback, but we also handle it here to return to main menu
     if action == "cancel" or data == "cancel":
-        clear_draft(context)
-        await safe_edit(query, "❌ Subscription cancelled.")
-        return ConversationHandler.END
+        # Go back to main menu without clearing draft
+        from .control_menus import show_main_menu
+        await safe_edit(query, "Returning to main menu.")
+        return await show_main_menu(query, context)
 
     if action == "all":
         return await _handle_all(query, context, prefix)
@@ -194,5 +207,7 @@ async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await _handle_back(update, context, prefix)
     elif action == "next":
         return await _handle_next(update, context, prefix)
+    elif action == "done":
+        return await _handle_done(query, context, prefix)
     else:
         return ConversationHandler.END

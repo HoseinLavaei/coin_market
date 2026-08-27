@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from .menus import build_numeric_keyboard
 
 # ─── Conversation States ─────────────────────────────────────
-SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, SELECT_REPEAT, CONFIRM = range(5)
+MAIN_MENU, SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, SELECT_REPEAT, CONFIRM = range(6)
 
 
 # ─── User Data & Draft Management ─────────────────────────
@@ -148,11 +148,9 @@ async def _handle_numeric_confirm(
         user_data.pop("num_buffer", None)
         user_data.pop("num_field", None)
 
-        await safe_edit(
-            query,
-            f"✅ {num_field.capitalize()} set to: {num_buffer}",
-        )
-        return ConversationHandler.END
+        # Return to main menu after setting value
+        from .control_menus import show_main_menu
+        return await show_main_menu(query, context)
 
     except (ValueError, TypeError):
         await safe_edit(query, "❌ Invalid number. Please try again.")

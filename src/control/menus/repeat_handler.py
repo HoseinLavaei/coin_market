@@ -9,7 +9,6 @@ from telegram.ext import ContextTypes, ConversationHandler
 from .common import (
     safe_edit,
     get_draft,
-    clear_draft,
     get_user_data,
     handle_numeric_input,
     SELECT_REPEAT,
@@ -77,15 +76,20 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 reply_markup=build_repeat_keyboard(None),
             )
             return SELECT_REPEAT
-        # Lazy import to avoid circular dependency
         from .confirm_handler import show_confirm
         return await show_confirm(query, context)
 
+    # ─── Done ─────────────────────────────────────────────────
+    if action == "done":
+        from .control_menus import show_main_menu
+        await safe_edit(query, f"✅ Repeat interval set to {draft.get('repeat_interval')} minutes.")
+        return await show_main_menu(query, context)
+
     # ─── Cancel ───────────────────────────────────────────────
     if data == "cancel":
-        clear_draft(context)
-        await safe_edit(query, "❌ Subscription cancelled.")
-        return ConversationHandler.END
+        from .control_menus import show_main_menu
+        await safe_edit(query, "Returning to main menu.")
+        return await show_main_menu(query, context)
 
     # ─── Preset value ─────────────────────────────────────────
     try:

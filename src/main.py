@@ -7,10 +7,14 @@ import asyncio
 import signal
 import sys
 
+from telegram.ext import ContextTypes
+
 from src.broadcast import run_broadcast_bot
 from src.control import run_control_bot
 from src.db import close_db
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    print(f"Update {update} caused error {context.error}")
 
 async def run_bot(app, name: str):
     """Run a bot with proper shutdown handling."""
@@ -31,6 +35,7 @@ async def run_bot(app, name: str):
     print(f"Starting {name}...")
 
     try:
+        app.add_error_handler(error_handler)
         await app.initialize()
         await app.start()
         await app.updater.start_polling()

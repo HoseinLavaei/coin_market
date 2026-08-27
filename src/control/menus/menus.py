@@ -9,6 +9,23 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from ...coins import ProviderName
 
 
+# ─── Main Menu Keyboard ─────────────────────────────────────
+
+def build_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Build the main menu dashboard keyboard."""
+    keyboard = [
+        [InlineKeyboardButton("🏛️ Select Providers", callback_data="menu:providers")],
+        [InlineKeyboardButton("📊 Select Types", callback_data="menu:types")],
+        [InlineKeyboardButton("💰 Set Volume", callback_data="menu:volume")],
+        [InlineKeyboardButton("🔄 Set Repeat", callback_data="menu:repeat")],
+        [InlineKeyboardButton("✅ Confirm & Activate", callback_data="menu:confirm")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="menu:cancel")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# ─── Provider Keyboard ─────────────────────────────────────
+
 def build_provider_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
     buttons = []
     for p in ProviderName:
@@ -23,11 +40,13 @@ def build_provider_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
 
     buttons.append([
         InlineKeyboardButton("🚫 Cancel", callback_data="cancel"),
-        InlineKeyboardButton("🔙 Back", callback_data="prov:back"),
         InlineKeyboardButton("➡️ Next", callback_data="prov:next"),
+        InlineKeyboardButton("✅ Done", callback_data="prov:done"),
     ])
     return InlineKeyboardMarkup(buttons)
 
+
+# ─── Type Keyboard ──────────────────────────────────────────
 
 def build_type_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
     buttons = []
@@ -45,9 +64,12 @@ def build_type_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🚫 Cancel", callback_data="cancel"),
         InlineKeyboardButton("🔙 Back", callback_data="type:back"),
         InlineKeyboardButton("➡️ Next", callback_data="type:next"),
+        InlineKeyboardButton("✅ Done", callback_data="type:done"),
     ])
     return InlineKeyboardMarkup(buttons)
 
+
+# ─── Volume Keyboard ────────────────────────────────────────
 
 def build_volume_keyboard(current: Decimal | None) -> InlineKeyboardMarkup:
     presets = [1, 10, 100, 1000]
@@ -62,9 +84,12 @@ def build_volume_keyboard(current: Decimal | None) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🚫 Cancel", callback_data="cancel"),
         InlineKeyboardButton("🔙 Back", callback_data="vol:back"),
         InlineKeyboardButton("➡️ Next", callback_data="vol:next"),
+        InlineKeyboardButton("✅ Done", callback_data="vol:done"),
     ])
     return InlineKeyboardMarkup(buttons)
 
+
+# ─── Repeat Keyboard ────────────────────────────────────────
 
 def build_repeat_keyboard(current: int | None) -> InlineKeyboardMarkup:
     """Build repeat keyboard with options in minutes."""
@@ -81,20 +106,25 @@ def build_repeat_keyboard(current: int | None) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🚫 Cancel", callback_data="cancel"),
         InlineKeyboardButton("🔙 Back", callback_data="rep:back"),
         InlineKeyboardButton("➡️ Next", callback_data="rep:next"),
+        InlineKeyboardButton("✅ Done", callback_data="rep:done"),
     ])
     return InlineKeyboardMarkup(buttons)
 
+
+# ─── Confirm Keyboard ───────────────────────────────────────
 
 def build_confirm_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [
             InlineKeyboardButton("🚫 Cancel", callback_data="confirm:cancel"),
             InlineKeyboardButton("🔙 Back", callback_data="confirm:back"),
-            InlineKeyboardButton("➡️ Next", callback_data="confirm:next"),
+            InlineKeyboardButton("✅ Done", callback_data="confirm:done"),
         ],
     ]
     return InlineKeyboardMarkup(buttons)
 
+
+# ─── Numeric Keypad ─────────────────────────────────────────
 
 def build_numeric_keyboard(
         include_negative: bool = False,

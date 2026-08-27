@@ -8,7 +8,7 @@ from decimal import Decimal
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_draft, clear_draft, get_user_data, SELECT_VOLUME
+from .common import safe_edit, get_draft, get_user_data, SELECT_VOLUME
 from .menus import build_volume_keyboard, build_numeric_keyboard
 
 
@@ -59,7 +59,6 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # ─── Back ─────────────────────────────────────────────────
     if action == "back":
-        # Lazy import to avoid circular dependency
         from .selection_handlers import show_selection
         return await show_selection(query, context, "type")
 
@@ -75,11 +74,19 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         from .repeat_handler import show_repeat
         return await show_repeat(query, context)
 
+    # ─── Done ─────────────────────────────────────────────────
+    if action == "done":
+        # Save current volume and return to main menu
+        from .control_menus import show_main_menu
+        await safe_edit(query, f"✅ Volume set to {draft.get('volume')}.")
+        return await show_main_menu(query, context)
+
     # ─── Cancel ───────────────────────────────────────────────
     if data == "cancel":
-        clear_draft(context)
-        await safe_edit(query, "❌ Subscription cancelled.")
-        return ConversationHandler.END
+        # Return to main menu without saving
+        from .control_menus import show_main_menu
+        await safe_edit(query, "Returning to main menu.")
+        return await show_main_menu(query, context)
 
     # ─── Preset value ─────────────────────────────────────────
     try:

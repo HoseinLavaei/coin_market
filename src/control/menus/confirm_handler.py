@@ -48,6 +48,7 @@ def build_subscription_description(provider, type_filter, volume, repeat_interva
 
     return " + ".join(parts) if parts else "📊 all data"
 
+
 async def show_confirm(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display confirmation menu with subscription summary."""
     draft = get_draft(context)
@@ -75,9 +76,10 @@ async def show_confirm(query, context: ContextTypes.DEFAULT_TYPE) -> int:
 # ─── Helper handlers ──────────────────────────────────────────
 
 async def _handle_cancel(query, context) -> int:
-    clear_draft(context)
-    await safe_edit(query, "❌ Subscription cancelled.")
-    return ConversationHandler.END
+    # Cancel: return to main menu without applying
+    from .control_menus import show_main_menu
+    await safe_edit(query, "Returning to main menu.")
+    return await show_main_menu(query, context)
 
 
 async def _handle_back(query, context) -> int:
@@ -158,9 +160,9 @@ async def _create_and_show_pending(
     return ConversationHandler.END
 
 
-async def _handle_next(query, context, user_id: int, draft: dict) -> int:
+async def _handle_confirm(query, context, user_id: int, draft: dict) -> int:
     """
-    Handle the 'Next' action from the confirmation menu.
+    Handle the 'Done' action from the confirmation menu.
     Checks if the user has an active subscription and routes accordingly.
     """
     provider_str = ",".join(draft.get("providers", [])) if draft.get("providers") else None
@@ -196,7 +198,7 @@ async def _handle_next(query, context, user_id: int, draft: dict) -> int:
         )
 
 
-# ─── Main callback (now a simple router) ─────────────────────
+# ─── Main callback ────────────────────────────────────────────
 
 async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle confirm selection interactions."""
@@ -218,12 +220,12 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if action == "back":
         return await _handle_back(query, context)
 
-    if action == "next":
+    if action == "done":
         user = update.effective_user
         if not user:
             await safe_edit(query, "❌ Could not identify user.")
             return ConversationHandler.END
         draft = get_draft(context)
-        return await _handle_next(query, context, user.id, draft)
+        return await _handle_confirm(query, context, user.id, draft)
 
     return CONFIRM
