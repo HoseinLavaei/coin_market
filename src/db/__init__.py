@@ -14,7 +14,6 @@ from .models import Subscription
 # ─── Repositories ───────────────────────────────────────────
 from .repositories import (
     get_subscription_for_user,
-    get_due_subscriptions,
     update_last_sent_at,
     delete_subscription,
     get_due_subscriptions_sync,

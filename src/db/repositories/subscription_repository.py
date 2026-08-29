@@ -7,7 +7,6 @@ from typing import Optional
 
 from sqlalchemy import create_engine, select, update, delete, text
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.sql import or_
 
 from ..database import AsyncSessionLocal
 from ..helpers import now_minutes, now_seconds
@@ -53,13 +52,13 @@ async def get_pending_by_key(key: str) -> Optional[Subscription]:
 
 
 async def create_or_replace_pending(
-    user_id: int,
-    provider: str | None,
-    type_filter: str | None,
-    volume: Decimal | None,
-    repeat_interval: int,
-    key: str,
-    expires_at: int,
+        user_id: int,
+        provider: str | None,
+        type_filter: str | None,
+        volume: Decimal | None,
+        repeat_interval: int,
+        key: str,
+        expires_at: int,
 ) -> Subscription:
     """
     Create a new pending subscription, or replace an existing one (active or pending)
@@ -125,7 +124,7 @@ async def claim_subscription_by_key(key: str, chat_id: int) -> dict | None:
         sub.chat_id = chat_id
         sub.activation_key = None
         sub.expires_at = None
-        sub.last_sent_at = None   # so first update is sent immediately
+        sub.last_sent_at = None  # so first update is sent immediately
         await session.commit()
         await session.refresh(sub)
 
@@ -140,11 +139,11 @@ async def claim_subscription_by_key(key: str, chat_id: int) -> dict | None:
 
 
 async def update_active_subscription(
-    user_id: int,
-    provider: str | None,
-    type_filter: str | None,
-    volume: Decimal | None,
-    repeat_interval: int,
+        user_id: int,
+        provider: str | None,
+        type_filter: str | None,
+        volume: Decimal | None,
+        repeat_interval: int,
 ) -> Subscription:
     """
     Update an existing ACTIVE subscription (chat_id NOT NULL) without creating a pending.
@@ -165,7 +164,7 @@ async def update_active_subscription(
         sub.type_filter = type_filter
         sub.volume = volume
         sub.repeat_interval = repeat_interval
-        sub.last_sent_at = None   # force immediate next update
+        sub.last_sent_at = None  # force immediate next update
         await session.commit()
         await session.refresh(sub)
         return sub
@@ -179,23 +178,6 @@ async def delete_subscription(user_id: int) -> int:
         )
         await session.commit()
         return result.rowcount
-
-
-# ─── Async versions for Celery (optional, but we keep the sync ones) ──
-
-async def get_due_subscriptions() -> list[Subscription]:
-    """Async version – only active subscriptions (chat_id NOT NULL)."""
-    now = now_minutes()
-    async with AsyncSessionLocal() as session:
-        stmt = select(Subscription).where(
-            Subscription.chat_id.is_not(None),
-            or_(
-                Subscription.last_sent_at.is_(None),
-                (Subscription.last_sent_at + Subscription.repeat_interval) <= now
-            )
-        )
-        result = await session.execute(stmt)
-        return list(result.scalars().all())
 
 
 async def update_last_sent_at(sub_id: int) -> None:
@@ -232,7 +214,8 @@ def get_due_subscriptions_sync() -> list[dict]:
                  SELECT id, chat_id, provider, type_filter, volume, repeat_interval
                  FROM subscriptions
                  WHERE chat_id IS NOT NULL
-                 AND (last_sent_at IS NULL OR last_sent_at + repeat_interval <= :now)
+                   AND repeat_interval IS NOT NULL
+                   AND (last_sent_at IS NULL OR last_sent_at + repeat_interval <= :now)
                  """),
             {"now": now_min}
         )
@@ -264,3 +247,54 @@ def update_last_sent_at_sync(sub_id: int) -> None:
         session.commit()
     finally:
         session.close()
+
+
+async def save_subscription_settings(
+        user_id: int,
+        provider: str | None = None,
+        type_filter: str | None = None,
+        volume: Decimal | None = None,
+        repeat_interval: int | None = None,
+        chat_id: int | None = None,
+) -> Subscription:
+    """
+    Upsert subscription settings for a user.
+    If the row doesn't exist, create it with chat_id = NULL.
+    If it exists, update only the provided fields (skip None values).
+    """
+    async with AsyncSessionLocal() as session:
+        # Try to get existing
+        stmt = select(Subscription).where(Subscription.user_id == user_id)
+        result = await session.execute(stmt)
+        sub = result.scalar_one_or_none()
+
+        if sub is None:
+            # Create new pending subscription with defaults
+            sub = Subscription(
+                user_id=user_id,
+                chat_id=chat_id,  # can be None
+                provider=provider,
+                type_filter=type_filter,
+                volume=volume,
+                repeat_interval=repeat_interval,
+                last_sent_at=None,
+                activation_key=None,
+                expires_at=None,
+            )
+            session.add(sub)
+        else:
+            # Update only provided fields
+            if provider is not None:
+                sub.provider = provider
+            if type_filter is not None:
+                sub.type_filter = type_filter
+            if volume is not None:
+                sub.volume = volume
+            if repeat_interval is not None:
+                sub.repeat_interval = repeat_interval
+            if chat_id is not None:
+                sub.chat_id = chat_id
+
+        await session.commit()
+        await session.refresh(sub)
+        return sub

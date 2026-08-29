@@ -1,31 +1,23 @@
 """
-Confirm selection handler.
-Shows a summary of all selections and confirms.
-- If user has an active subscription (chat_id NOT NULL): updates it directly.
-- Otherwise: generates a key + pending subscription.
+Confirmation handler for new users.
+Shows summary and confirms before generating activation key.
 """
 
 import secrets
-import logger
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_draft, clear_draft, CONFIRM
+import logger
+from .common import safe_edit, get_user_data, CONFIRM
 from .menus import build_confirm_keyboard
 from .repeat_handler import show_repeat
-from ...db import (
-    get_active_subscription_for_user,
-    update_active_subscription,
-    create_or_replace_pending,
-)
+from ...db import create_or_replace_pending
 from ...environment import KEY_EXPIRY_SECONDS, TIMEZONE, BROADCAST_BOT_USERNAME
 
 
 def build_subscription_description(provider, type_filter, volume, repeat_interval) -> str:
-
     parts = []
     if provider:
         if "," in provider:
@@ -51,97 +43,55 @@ def build_subscription_description(provider, type_filter, volume, repeat_interva
 
 async def show_confirm(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display confirmation menu with subscription summary."""
-    draft = get_draft(context)
+    user_data = get_user_data(context)
+    sub = user_data.get("current_subscription", {})
 
-    provider_str = ",".join(draft.get("providers", [])) if draft.get("providers") else None
-    type_str = ",".join(draft.get("types", [])) if draft.get("types") else None
+    provider = sub.get("provider")
+    type_filter = sub.get("type_filter")
+    volume = sub.get("volume")
+    repeat_interval = sub.get("repeat_interval")
 
-    summary = build_subscription_description(
-        provider_str,
-        type_str,
-        draft.get("volume"),
-        draft.get("repeat_interval"),
-    )
+    summary = build_subscription_description(provider, type_filter, volume, repeat_interval)
 
     text = (
-        "📋 **Confirm Subscription**\n\n"
+        "<b>📋 Confirm Subscription</b>\n\n"
         f"{summary}\n\n"
-        "Review your selections and confirm:"
+        "Press Confirm to activate your subscription:"
     )
 
-    await safe_edit(query, text, reply_markup=build_confirm_keyboard())
+    await safe_edit(query, text, reply_markup=build_confirm_keyboard(), parse_mode="HTML")
     return CONFIRM
 
 
-# ─── Helper handlers ──────────────────────────────────────────
-
-async def _handle_cancel(query, context) -> int:
-    # Cancel: return to main menu without applying
-    from .control_menus import show_main_menu
-    await safe_edit(query, "Returning to main menu.")
-    return await show_main_menu(query, context)
-
-
-async def _handle_back(query, context) -> int:
-    return await show_repeat(query, context)
-
-
-async def _handle_existing_active(
-        query,
-        context,
-        user_id: int,
-        provider_str: str | None,
-        type_str: str | None,
-        volume: Decimal | None,
-        repeat_interval: int,
-) -> int:
-    """Update an existing active subscription directly."""
-    try:
-        await update_active_subscription(
-            user_id=user_id,
-            provider=provider_str,
-            type_filter=type_str,
-            volume=volume,
-            repeat_interval=repeat_interval,
-        )
-        clear_draft(context)
-        await safe_edit(query, "✅ Subscription updated successfully! The first update will be sent within the next minute.")
-        return ConversationHandler.END
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        await safe_edit(query, f"❌ Failed to update subscription: {e}")
-        return ConversationHandler.END
-
-
-async def _create_and_show_pending(
-        query,
-        context,
-        user_id: int,
-        provider_str: str | None,
-        type_str: str | None,
-        volume: Decimal | None,
-        repeat_interval: int,
-) -> int:
-    """Generate a key, create/replace pending subscription, and show activation link."""
+async def perform_activation(query, user_id: int, sub: dict) -> int:
+    """
+    Generate a key and activate the pending subscription.
+    Called when the user presses Confirm.
+    """
     key = str(secrets.randbelow(1000000)).zfill(6)
     expires_at: int = int((datetime.now(TIMEZONE) + timedelta(seconds=KEY_EXPIRY_SECONDS)).timestamp())
+
+    provider = sub.get("provider")
+    type_filter = sub.get("type_filter")
+    volume = sub.get("volume")
+    repeat_interval = sub.get("repeat_interval", 1)
 
     try:
         await create_or_replace_pending(
             user_id=user_id,
-            provider=provider_str,
-            type_filter=type_str,
+            provider=provider,
+            type_filter=type_filter,
             volume=volume,
             repeat_interval=repeat_interval,
             key=key,
             expires_at=expires_at,
         )
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Failed to create pending subscription: {e}")
         await safe_edit(query, f"❌ Failed to create pending subscription: {e}")
         return ConversationHandler.END
 
-    filter_desc = build_subscription_description(provider_str, type_str, volume, repeat_interval)
+    filter_desc = build_subscription_description(provider, type_filter, volume, repeat_interval)
     link = f"https://t.me/{BROADCAST_BOT_USERNAME}?start={key}"
 
     await safe_edit(
@@ -156,49 +106,8 @@ async def _create_and_show_pending(
         f"(The key is valid for {KEY_EXPIRY_SECONDS} seconds.)",
         parse_mode=None,
     )
-    clear_draft(context)
     return ConversationHandler.END
 
-
-async def _handle_confirm(query, context, user_id: int, draft: dict) -> int:
-    """
-    Handle the 'Done' action from the confirmation menu.
-    Checks if the user has an active subscription and routes accordingly.
-    """
-    provider_str = ",".join(draft.get("providers", [])) if draft.get("providers") else None
-    type_str = ",".join(draft.get("types", [])) if draft.get("types") else None
-    repeat_interval = draft.get("repeat_interval")
-    volume = draft.get("volume")
-
-    if not isinstance(repeat_interval, int):
-        await safe_edit(query, "❌ Invalid interval.")
-        return ConversationHandler.END
-
-    existing_active = await get_active_subscription_for_user(user_id)
-
-    if existing_active:
-        return await _handle_existing_active(
-            query,
-            context,
-            user_id,
-            provider_str,
-            type_str,
-            volume,
-            repeat_interval,
-        )
-    else:
-        return await _create_and_show_pending(
-            query,
-            context,
-            user_id,
-            provider_str,
-            type_str,
-            volume,
-            repeat_interval,
-        )
-
-
-# ─── Main callback ────────────────────────────────────────────
 
 async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle confirm selection interactions."""
@@ -214,18 +123,18 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     action = data.split(":", 1)[1]
 
-    if action == "cancel":
-        return await _handle_cancel(query, context)
-
     if action == "back":
-        return await _handle_back(query, context)
+        return await show_repeat(query, context)
 
-    if action == "done":
-        user = update.effective_user
-        if not user:
+    if action == "confirm":
+        user_data = get_user_data(context)
+        user_id = user_data.get("user_id")
+        sub = user_data.get("current_subscription")
+
+        if not isinstance(user_id, int) or not isinstance(sub, dict):
             await safe_edit(query, "❌ Could not identify user.")
             return ConversationHandler.END
-        draft = get_draft(context)
-        return await _handle_confirm(query, context, user.id, draft)
+
+        return await perform_activation(query, user_id, sub)
 
     return CONFIRM

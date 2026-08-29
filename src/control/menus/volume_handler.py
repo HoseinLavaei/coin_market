@@ -1,6 +1,6 @@
 """
 Volume selection handler.
-Single‑select from presets or custom numeric input.
+Auto‑saves to DB immediately.
 """
 
 from decimal import Decimal
@@ -8,14 +8,16 @@ from decimal import Decimal
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_draft, get_user_data, SELECT_VOLUME
+from .common import safe_edit, get_user_data, SELECT_VOLUME
 from .menus import build_volume_keyboard, build_numeric_keyboard
+from ...db.repositories.subscription_repository import save_subscription_settings
 
 
 async def show_volume(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display volume selection menu with current selection shown."""
-    draft = get_draft(context)
-    current = draft.get("volume")
+    user_data = get_user_data(context)
+    sub = user_data.get("current_subscription", {})
+    current = sub.get("volume")
 
     if current is not None:
         text = f"📦 Selected volume: {current}\n\nSelect volume (or use Custom):"
@@ -24,6 +26,20 @@ async def show_volume(query, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     await safe_edit(query, text, reply_markup=build_volume_keyboard(current))
     return SELECT_VOLUME
+
+
+async def _save_volume(context: ContextTypes.DEFAULT_TYPE, value: Decimal | None) -> None:
+    """Save volume to DB and update user_data."""
+    user_data = get_user_data(context)
+    user_id: int | None = user_data.get("user_id")
+    if not user_id:
+        return
+
+    await save_subscription_settings(user_id=user_id, volume=value)
+
+    sub = user_data.get("current_subscription", {})
+    sub["volume"] = value
+    user_data["current_subscription"] = sub
 
 
 async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -41,7 +57,6 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return SELECT_VOLUME
 
     action = data.split(":", 1)[1]
-    draft = get_draft(context)
 
     # ─── Custom ──────────────────────────────────────────────
     if action == "custom":
@@ -64,7 +79,9 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # ─── Next ─────────────────────────────────────────────────
     if action == "next":
-        if draft.get("volume") is None:
+        user_data = get_user_data(context)
+        sub = user_data.get("current_subscription", {})
+        if sub.get("volume") is None:
             await safe_edit(
                 query,
                 "❌ Please select a volume or use 'Custom'.",
@@ -74,24 +91,16 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         from .repeat_handler import show_repeat
         return await show_repeat(query, context)
 
-    # ─── Done ─────────────────────────────────────────────────
-    if action == "done":
-        # Save current volume and return to main menu
+    # ─── Menu ─────────────────────────────────────────────────
+    if action == "menu":
         from .control_menus import show_main_menu
-        await safe_edit(query, f"✅ Volume set to {draft.get('volume')}.")
-        return await show_main_menu(query, context)
-
-    # ─── Cancel ───────────────────────────────────────────────
-    if data == "cancel":
-        # Return to main menu without saving
-        from .control_menus import show_main_menu
-        await safe_edit(query, "Returning to main menu.")
         return await show_main_menu(query, context)
 
     # ─── Preset value ─────────────────────────────────────────
     try:
         value = Decimal(action)
-        draft["volume"] = value
+        await _save_volume(context, value)
+
         await safe_edit(
             query,
             f"📦 Selected volume: {value}\n\nSelect volume (or use Custom):",

@@ -16,30 +16,17 @@ from .menus import build_numeric_keyboard
 MAIN_MENU, SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, SELECT_REPEAT, CONFIRM = range(6)
 
 
-# ─── User Data & Draft Management ─────────────────────────
+# ─── User Data helpers ──────────────────────────────────────
 
 def get_user_data(context: ContextTypes.DEFAULT_TYPE) -> dict:
     """Return user_data as a typed dict."""
     return cast(dict, context.user_data)
 
 
-def get_draft(context: ContextTypes.DEFAULT_TYPE) -> dict:
-    """Get or initialize the draft dictionary."""
+def get_current_subscription(context: ContextTypes.DEFAULT_TYPE) -> dict | None:
+    """Get the current subscription from user_data (loaded from DB)."""
     user_data = get_user_data(context)
-    if "draft" not in user_data:
-        user_data["draft"] = {
-            "providers": [],
-            "types": [],
-            "volume": None,
-            "repeat_interval": None,
-        }
-    return user_data["draft"]
-
-
-def clear_draft(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Remove the draft from user_data."""
-    user_data = get_user_data(context)
-    user_data.pop("draft", None)
+    return user_data.get("current_subscription")
 
 
 # ─── Safe Edit ─────────────────────────────────────────────
@@ -110,6 +97,45 @@ async def _handle_numeric_digit(user_data: dict, num_buffer: str, digit: str, st
     return state
 
 
+async def _save_numeric_value(
+        user_id: int,
+        num_field: str,
+        value: Decimal | int,
+        user_data: dict,
+) -> None:
+    """Save the numeric value to the database and update user_data."""
+    from ...db.repositories.subscription_repository import save_subscription_settings
+
+    if num_field == "volume":
+        # mypy can't infer that value is Decimal here, but we know it
+        await save_subscription_settings(user_id=user_id, volume=value)  # type: ignore[arg-type]
+        if user_data.get("current_subscription"):
+            user_data["current_subscription"]["volume"] = value
+    elif num_field == "repeat":
+        await save_subscription_settings(user_id=user_id, repeat_interval=value)  # type: ignore[arg-type]
+        if user_data.get("current_subscription"):
+            user_data["current_subscription"]["repeat_interval"] = value
+
+
+def _validate_and_parse_numeric(num_buffer: str, num_field: str) -> Decimal | int | None:
+    """Parse and validate numeric input for volume or repeat."""
+    try:
+        if num_field == "volume":
+            val = Decimal(num_buffer)
+            if val <= 0:
+                return None
+            return val
+        elif num_field == "repeat":
+            val = int(num_buffer)
+            if val <= 0:
+                return None
+            return val
+        else:
+            return None
+    except (ValueError, TypeError):
+        return None
+
+
 async def _handle_numeric_confirm(
         query,
         context: ContextTypes.DEFAULT_TYPE,
@@ -118,49 +144,34 @@ async def _handle_numeric_confirm(
         num_field: str,
         state: int,
 ) -> int:
-    """Handle confirm (Next) key on numeric keypad."""
+    """Handle confirm (Set) key on numeric keypad."""
     if not num_buffer or num_buffer in ("-", "."):
         await safe_edit(query, "❌ Please enter a number.")
         return state
 
-    try:
-        if num_field == "volume":
-            value = Decimal(num_buffer)
-            if value <= 0:
-                raise ValueError
-        elif num_field == "repeat":
-            value = int(num_buffer)
-            if value <= 0:
-                raise ValueError
-        else:
-            await safe_edit(query, "❌ Unknown field.")
-            return state
-
-        draft = get_draft(context)
-        if num_field == "volume":
-            draft["volume"] = value
-        elif num_field == "repeat":
-            draft["repeat_interval"] = value
-        else:
-            await safe_edit(query, "❌ Unknown field.")
-            return state
-
-        user_data.pop("num_buffer", None)
-        user_data.pop("num_field", None)
-
-        # Return to main menu after setting value
-        from .control_menus import show_main_menu
-        return await show_main_menu(query, context)
-
-    except (ValueError, TypeError):
+    parsed = _validate_and_parse_numeric(num_buffer, num_field)
+    if parsed is None:
         await safe_edit(query, "❌ Invalid number. Please try again.")
         return state
 
+    user_id = user_data.get("user_id")
+    if not isinstance(user_id, int):
+        await safe_edit(query, "❌ Could not identify user.")
+        return state
 
-async def _handle_numeric_back(_context: ContextTypes.DEFAULT_TYPE, user_data: dict) -> int:
+    await _save_numeric_value(user_id, num_field, parsed, user_data)
+
+    # Clear numeric state
     user_data.pop("num_buffer", None)
     user_data.pop("num_field", None)
-    return ConversationHandler.END
+
+    # Return to the appropriate sub‑menu
+    if num_field == "volume":
+        from .volume_handler import show_volume
+        return await show_volume(query, context)
+    else:
+        from .repeat_handler import show_repeat
+        return await show_repeat(query, context)
 
 
 # ─── Main Numeric Input Handler ─────────────────────────────
@@ -200,8 +211,16 @@ async def handle_numeric_input(
         result = await _handle_numeric_negative(user_data, num_buffer, state)
     elif action == "next":
         result = await _handle_numeric_confirm(query, context, user_data, num_buffer, num_field, state)
+        return result  # Don't try to update display again
     elif action == "back":
-        result = await _handle_numeric_back(context, user_data)
+        user_data.pop("num_buffer", None)
+        user_data.pop("num_field", None)
+        if num_field == "volume":
+            from .volume_handler import show_volume
+            return await show_volume(query, context)
+        else:
+            from .repeat_handler import show_repeat
+            return await show_repeat(query, context)
     elif action.isdigit():
         result = await _handle_numeric_digit(user_data, num_buffer, action, state)
     else:

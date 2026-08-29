@@ -1,6 +1,6 @@
 """
 Repeat interval selection handler.
-Single‑select from presets or custom numeric input.
+Auto‑saves to DB immediately.
 """
 
 from telegram import Update
@@ -8,18 +8,24 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from .common import (
     safe_edit,
-    get_draft,
     get_user_data,
     handle_numeric_input,
     SELECT_REPEAT,
 )
 from .menus import build_repeat_keyboard, build_numeric_keyboard
+from ...db.repositories.subscription_repository import save_subscription_settings
 
 
 async def show_repeat(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display repeat interval selection menu with current selection shown."""
-    draft = get_draft(context)
-    current: int | None = draft.get("repeat_interval")
+    user_data = get_user_data(context)
+    sub = user_data.get("current_subscription", {})
+    current = sub.get("repeat_interval")
+    is_new = user_data.get("is_new", False)
+
+    # Ensure current is int | None (not Any)
+    if not isinstance(current, int):
+        current = None
 
     if current is not None:
         label = f"{current}m"
@@ -27,8 +33,22 @@ async def show_repeat(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         text = "⏱️ Select interval (or use Custom):"
 
-    await safe_edit(query, text, reply_markup=build_repeat_keyboard(current))
+    await safe_edit(query, text, reply_markup=build_repeat_keyboard(current, show_next=is_new))
     return SELECT_REPEAT
+
+
+async def _save_repeat(context: ContextTypes.DEFAULT_TYPE, value: int | None) -> None:
+    """Save repeat interval to DB and update user_data."""
+    user_data = get_user_data(context)
+    user_id: int | None = user_data.get("user_id")
+    if not user_id:
+        return
+
+    await save_subscription_settings(user_id=user_id, repeat_interval=value)
+
+    sub = user_data.get("current_subscription", {})
+    sub["repeat_interval"] = value
+    user_data["current_subscription"] = sub
 
 
 async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -46,14 +66,14 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return SELECT_REPEAT
 
     action = data.split(":", 1)[1]
-    draft = get_draft(context)
+    user_data = get_user_data(context)
+    is_new = user_data.get("is_new", False)
 
     # ─── Custom ──────────────────────────────────────────────
     if action == "custom":
-        user_data = get_user_data(context)
         user_data["num_field"] = "repeat"
         user_data["num_buffer"] = ""
-        text = "✏️ Enter interval in seconds (number):\n\n \n\n(use the keypad below)"
+        text = "✏️ Enter interval in minutes (number):\n\n \n\n(use the keypad below)"
         await safe_edit(
             query,
             text,
@@ -69,37 +89,38 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # ─── Next ─────────────────────────────────────────────────
     if action == "next":
-        if draft.get("repeat_interval") is None:
+        sub = user_data.get("current_subscription", {})
+        current = sub.get("repeat_interval")
+        if not isinstance(current, int):
+            current = None
+
+        if current is None:
             await safe_edit(
                 query,
                 "❌ Please select an interval or use 'Custom'.",
-                reply_markup=build_repeat_keyboard(None),
+                reply_markup=build_repeat_keyboard(None, show_next=True),
             )
             return SELECT_REPEAT
+
+        # New user – go to confirmation screen
         from .confirm_handler import show_confirm
         return await show_confirm(query, context)
 
-    # ─── Done ─────────────────────────────────────────────────
-    if action == "done":
+    # ─── Menu ─────────────────────────────────────────────────
+    if action == "menu":
         from .control_menus import show_main_menu
-        await safe_edit(query, f"✅ Repeat interval set to {draft.get('repeat_interval')} minutes.")
-        return await show_main_menu(query, context)
-
-    # ─── Cancel ───────────────────────────────────────────────
-    if data == "cancel":
-        from .control_menus import show_main_menu
-        await safe_edit(query, "Returning to main menu.")
         return await show_main_menu(query, context)
 
     # ─── Preset value ─────────────────────────────────────────
     try:
         minutes = int(action)
-        draft["repeat_interval"] = minutes
+        await _save_repeat(context, minutes)
+
         label = f"{minutes}m"
         await safe_edit(
             query,
             f"⏱️ Selected interval: {label}\n\nSelect interval (or use Custom):",
-            reply_markup=build_repeat_keyboard(minutes),
+            reply_markup=build_repeat_keyboard(minutes, show_next=is_new),
         )
         return SELECT_REPEAT
     except (ValueError, TypeError):

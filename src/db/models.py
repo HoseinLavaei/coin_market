@@ -21,10 +21,12 @@ class Subscription(Base):
     provider: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     type_filter: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     volume: Mapped[Decimal | None] = mapped_column(sa.DECIMAL, nullable=True)
-    repeat_interval: Mapped[int] = mapped_column(sa.Integer, nullable=False)  # minutes
+    repeat_interval: Mapped[int | None] = mapped_column(sa.Integer, nullable=False)  # minutes
     last_sent_at: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)  # minutes since epoch
-    activation_key: Mapped[str | None] = mapped_column(sa.String, nullable=True, unique=True)  # 6‑digit, NULL when active
-    expires_at: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)  # seconds since epoch, NULL when active
+    activation_key: Mapped[str | None] = mapped_column(sa.String, nullable=True,
+                                                       unique=True)  # 6‑digit, NULL when active
+    expires_at: Mapped[int | None] = mapped_column(sa.BigInteger,
+                                                   nullable=True)  # seconds since epoch, NULL when active
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), default=datetime.now, onupdate=datetime.now
