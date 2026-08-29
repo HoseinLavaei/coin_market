@@ -2,6 +2,7 @@ from typing import Protocol, runtime_checkable
 
 import httpx
 
+import logger
 from ..enums import ProviderName, Quote, Base
 from ..models import OrderBooks, Coins
 
@@ -17,7 +18,8 @@ async def get_json(url: str, params: dict[str, str] | None = None) -> dict:
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as e:
-        raise RuntimeError(f"API error: {e}") from e
+        logger.warning(f"API error: {e}")
+        raise TimeoutError(f"API error: {e}") from e
 
 
 @runtime_checkable

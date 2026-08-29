@@ -108,37 +108,32 @@ class BitpinProvider:
     @classmethod
     async def _fetch_orderbook(cls, market_id: int, base: Base, quote: Quote, semaphore: asyncio.Semaphore):
         async with semaphore:
-            try:
-                url = f"https://api.bitpin.ir/v4/mth/orderbook/{market_id}/"
-                data = await get_json(url)
+            url = f"https://api.bitpin.ir/v4/mth/orderbook/{market_id}/"
+            data = await get_json(url)
 
-                bids_raw = data.get("bids", [])
-                asks_raw = data.get("asks", [])
-                now = datetime.datetime.now(datetime.timezone.utc)
+            bids_raw = data.get("bids", [])
+            asks_raw = data.get("asks", [])
+            now = datetime.datetime.now(datetime.timezone.utc)
 
-                def build_orders(raw) -> list[Order]:
-                    return [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                raw_buy_price=Decimal(str(price)),
-                                raw_sell_price=Decimal(str(price)),
-                                buy_fee=Decimal(0.35),
-                                sell_fee=Decimal(0.35),
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
-                        )
-                        for price, amount in raw
-                    ]
+            def build_orders(raw) -> list[Order]:
+                return [
+                    Order(
+                        coin=Coin(
+                            provider=cls.provider_name,
+                            base=base,
+                            quote=quote,
+                            raw_buy_price=Decimal(str(price)),
+                            raw_sell_price=Decimal(str(price)),
+                            buy_fee=Decimal(0.35),
+                            sell_fee=Decimal(0.35),
+                            timestamp=now,
+                        ),
+                        quantity=Decimal(str(amount)),
+                    )
+                    for price, amount in raw
+                ]
 
-                return (quote, base), OrderBook(
-                    asks=build_orders(asks_raw),
-                    bids=build_orders(bids_raw),
-                )
-
-            except Exception as exc:
-                print(f"Bitpin orderbook fetch failed: {exc}")
-                return None
+            return (quote, base), OrderBook(
+                asks=build_orders(asks_raw),
+                bids=build_orders(bids_raw),
+            )

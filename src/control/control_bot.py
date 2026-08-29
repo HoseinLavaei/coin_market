@@ -3,6 +3,9 @@ Control bot – runs the subscription flow.
 """
 
 import sys
+
+import logger
+
 from typing import Any
 
 from telegram import Bot
@@ -17,16 +20,15 @@ async def run_control_bot() -> Application[
     Bot, CallbackContext[Any, Any, Any, Any], Any, Any, Any, JobQueue[Any] | None]:
     """Run the control bot with the conversation handler."""
     if not CONTROL_BOT_TOKEN:
-        print("Error: CONTROL_BOT_TOKEN environment variable not set.")
+        logger.error("Error: CONTROL_BOT_TOKEN environment variable not set.")
         sys.exit(1)
 
-    print("Initializing database...")
+    logger.info("Initializing database...")
     await init_db()
 
     app = ApplicationBuilder().token(CONTROL_BOT_TOKEN).build()
     app.add_handler(control_conversation)
 
-    print("Control bot started.")
-    print("Use /start or /menu to begin.")
+    logger.info("Control bot started.")
 
     return app

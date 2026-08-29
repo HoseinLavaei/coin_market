@@ -6,7 +6,7 @@ Shows a summary of all selections and confirms.
 """
 
 import secrets
-import traceback
+import logger
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -108,7 +108,7 @@ async def _handle_existing_active(
         await safe_edit(query, "✅ Subscription updated successfully! The first update will be sent within the next minute.")
         return ConversationHandler.END
     except Exception as e:
-        traceback.print_exc()
+        logger.error(f"Error: {e}")
         await safe_edit(query, f"❌ Failed to update subscription: {e}")
         return ConversationHandler.END
 
@@ -137,7 +137,7 @@ async def _create_and_show_pending(
             expires_at=expires_at,
         )
     except Exception as e:
-        traceback.print_exc()
+        logger.error(f"Error: {e}")
         await safe_edit(query, f"❌ Failed to create pending subscription: {e}")
         return ConversationHandler.END
 

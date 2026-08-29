@@ -105,35 +105,26 @@ class ExirProvider:
             pair_name = f"{base.value.lower()}-{quote_str}"
 
             async with semaphore:
-                try:
-                    data = await get_json("https://api.exir.io/v2/orderbook", params={"symbol": pair_name})
+                data = await get_json("https://api.exir.io/v2/orderbook", params={"symbol": pair_name})
 
-                    if pair_name not in data:
-                        print(f"Exir: No data for symbol '{pair_name}'")
-                        return None
-
-                    order_data = data.get(pair_name)
-                    if not order_data or not isinstance(order_data, dict):
-                        print(f"Exir: Invalid data for '{pair_name}'")
-                        return None
-
-                    bids_raw = order_data.get("bids", [])
-                    asks_raw = order_data.get("asks", [])
-
-                    if not bids_raw and not asks_raw:
-                        print(f"Exir: Empty orderbook for '{pair_name}'")
-                        return None
-
-                    now = datetime.datetime.now(datetime.timezone.utc)
-                    return (quote, base), OrderBook(
-                        asks=build_orders(asks_raw, quote, base, now),
-                        bids=build_orders(bids_raw, quote, base, now),
-                    )
-
-                except Exception as e:
-                    print(f"Exir: Error fetching orderbook for {pair_name}: {e}")
+                if pair_name not in data:
                     return None
 
+                order_data = data.get(pair_name)
+                if not order_data or not isinstance(order_data, dict):
+                    return None
+
+                bids_raw = order_data.get("bids", [])
+                asks_raw = order_data.get("asks", [])
+
+                if not bids_raw and not asks_raw:
+                    return None
+
+                now = datetime.datetime.now(datetime.timezone.utc)
+                return (quote, base), OrderBook(
+                    asks=build_orders(asks_raw, quote, base, now),
+                    bids=build_orders(bids_raw, quote, base, now),
+                )
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)
 

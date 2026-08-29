@@ -6,6 +6,7 @@ import urllib.parse
 
 import asyncpg
 
+import logger
 from ..environment import DATABASE_URL
 
 
@@ -38,18 +39,18 @@ async def init_db():
                     updated_at      TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
-            print("Unified subscriptions table ready (created if not existed)")
+            logger.info("subscriptions table ready (created if not existed)")
 
             # Indexes – create if not exist
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_activation_key ON subscriptions (activation_key)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_last_sent_at ON subscriptions (last_sent_at)")
-            print("Indexes ready")
+            logger.info("Indexes ready")
 
         finally:
             await conn.close()
 
     except Exception as e:
-        print(f"Error initializing database: {e}")
+        logger.error(f"Error initializing database: {e}")
         raise

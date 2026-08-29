@@ -75,41 +75,36 @@ class NobitexProvider:
             pair = f"{base.value}{quote_str}"
 
             async with semaphore:
-                try:
-                    data = await get_json(f"https://apiv2.nobitex.ir/v2/depth/{pair}")
-                    if data.get("status") != "ok":
-                        return None
-
-                    bids_raw = data.get("bids", [])
-                    asks_raw = data.get("asks", [])
-                    now = datetime.datetime.now(datetime.timezone.utc)
-
-                    def build_orders(raw) -> list[Order]:
-                        return [
-                            Order(
-                                coin=Coin(
-                                    provider=cls.provider_name,
-                                    base=base,
-                                    quote=quote,
-                                    raw_buy_price=Decimal(str(price)) / 10,
-                                    raw_sell_price=Decimal(str(price)) / 10,
-                                    buy_fee=Decimal(0.25),
-                                    sell_fee=Decimal(0.25),
-                                    timestamp=now,
-                                ),
-                                quantity=Decimal(str(amount)),
-                            )
-                            for price, amount in raw
-                        ]
-
-                    return (quote, base), OrderBook(
-                        asks=build_orders(asks_raw),
-                        bids=build_orders(bids_raw),
-                    )
-
-                except Exception as e:
-                    print(f"Nobitex orderbook fetch failed: {e}")
+                data = await get_json(f"https://apiv2.nobitex.ir/v2/depth/{pair}")
+                if data.get("status") != "ok":
                     return None
+
+                bids_raw = data.get("bids", [])
+                asks_raw = data.get("asks", [])
+                now = datetime.datetime.now(datetime.timezone.utc)
+
+                def build_orders(raw) -> list[Order]:
+                    return [
+                        Order(
+                            coin=Coin(
+                                provider=cls.provider_name,
+                                base=base,
+                                quote=quote,
+                                raw_buy_price=Decimal(str(price)) / 10,
+                                raw_sell_price=Decimal(str(price)) / 10,
+                                buy_fee=Decimal(0.25),
+                                sell_fee=Decimal(0.25),
+                                timestamp=now,
+                            ),
+                            quantity=Decimal(str(amount)),
+                        )
+                        for price, amount in raw
+                    ]
+
+                return (quote, base), OrderBook(
+                    asks=build_orders(asks_raw),
+                    bids=build_orders(bids_raw),
+                )
 
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)
