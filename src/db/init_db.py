@@ -24,32 +24,39 @@ async def init_db():
         try:
             # Create unified subscriptions table if not exists
             await conn.execute("""
-                               CREATE TABLE IF NOT EXISTS subscriptions
-                               (
-                                   id              SERIAL PRIMARY KEY,
-                                   user_id         BIGINT NOT NULL UNIQUE,
-                                   chat_id         BIGINT,      -- NULL = pending
-                                   provider        VARCHAR,
-                                   type_filter     VARCHAR,
-                                   volume          DECIMAL,
-                                   repeat_interval INTEGER,
-                                   last_sent_at    BIGINT,      -- minutes since epoch
-                                   activation_key  TEXT UNIQUE, -- NULL when active
-                                   expires_at      BIGINT,      -- seconds since epoch, NULL when active
-                                   created_at      TIMESTAMPTZ DEFAULT NOW(),
-                                   updated_at      TIMESTAMPTZ DEFAULT NOW()
-                               )
-                               """)
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id              SERIAL PRIMARY KEY,
+                    user_id         BIGINT UNIQUE,                  -- NULL for manual channel subscriptions
+                    chat_id         BIGINT,                         -- NULL = pending
+                    provider        VARCHAR,
+                    type_filter     VARCHAR,
+                    volume          DECIMAL,
+                    repeat_interval INTEGER,
+                    last_sent_at    BIGINT,                         -- minutes since epoch
+                    activation_key  TEXT UNIQUE,                    -- NULL when active
+                    expires_at      BIGINT,                         -- seconds since epoch, NULL when active
+                    created_at      TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
             logger.info("subscriptions table ready (created if not existed)")
 
             # Indexes – create if not exist
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)")
             await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_subscriptions_activation_key ON subscriptions (activation_key)")
+                "CREATE INDEX IF NOT EXISTS idx_subscriptions_activation_key ON subscriptions (activation_key)"
+            )
             await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_subscriptions_last_sent_at ON subscriptions (last_sent_at)")
+                "CREATE INDEX IF NOT EXISTS idx_subscriptions_last_sent_at ON subscriptions (last_sent_at)"
+            )
             logger.info("Indexes ready")
+
+            # ─── Fix sequence if out of sync ──────────────────────
+            await conn.execute("""
+                SELECT setval('subscriptions_id_seq', COALESCE((SELECT MAX(id) FROM subscriptions), 1))
+            """)
+            logger.info("Sequence synchronised")
 
         finally:
             await conn.close()

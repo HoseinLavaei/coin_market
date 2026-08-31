@@ -3,7 +3,7 @@ Repository for unified subscriptions – CRUD, pending, and sync versions for Ce
 """
 
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import create_engine, select, update, delete, text
 from sqlalchemy.orm import sessionmaker
@@ -52,7 +52,7 @@ async def get_pending_by_key(key: str) -> Optional[Subscription]:
 
 
 async def create_or_replace_pending(
-        user_id: int,
+        user_id: int | None,  # now accepts None for manual insertions
         provider: str | None,
         type_filter: str | None,
         volume: Decimal | None,
@@ -62,12 +62,14 @@ async def create_or_replace_pending(
 ) -> Subscription:
     """
     Create a new pending subscription, or replace an existing one (active or pending)
-    for the same user.
+    for the same user. If user_id is None, it creates a new row without a user (manual).
     """
     async with AsyncSessionLocal() as session:
-        # Check if a row exists for this user
-        stmt = select(Subscription).where(Subscription.user_id == user_id)
-        existing = (await session.execute(stmt)).scalar_one_or_none()
+        # If user_id is provided, check if a row exists for this user
+        existing = None
+        if user_id is not None:
+            stmt = select(Subscription).where(Subscription.user_id == user_id)
+            existing = (await session.execute(stmt)).scalar_one_or_none()
 
         if existing:
             # Update all fields – make it pending
@@ -79,13 +81,12 @@ async def create_or_replace_pending(
             existing.last_sent_at = None
             existing.activation_key = key
             existing.expires_at = expires_at
-            # updated_at will auto‑update
             await session.commit()
             await session.refresh(existing)
-            return existing
+            return cast(Subscription, existing)
         else:
             new_sub = Subscription(
-                user_id=user_id,
+                user_id=user_id,  # can be None
                 chat_id=None,
                 provider=provider,
                 type_filter=type_filter,
@@ -108,7 +109,6 @@ async def claim_subscription_by_key(key: str, chat_id: int) -> dict | None:
     """
     now = now_seconds()
     async with AsyncSessionLocal() as session:
-        # Use row lock to prevent race conditions
         stmt = select(Subscription).where(
             Subscription.activation_key == key,
             Subscription.expires_at > now,
@@ -120,11 +120,10 @@ async def claim_subscription_by_key(key: str, chat_id: int) -> dict | None:
         if not sub:
             return None
 
-        # Activate: set chat_id, clear key/expires, reset last_sent_at
         sub.chat_id = chat_id
         sub.activation_key = None
         sub.expires_at = None
-        sub.last_sent_at = None  # so first update is sent immediately
+        sub.last_sent_at = None
         await session.commit()
         await session.refresh(sub)
 
@@ -164,7 +163,7 @@ async def update_active_subscription(
         sub.type_filter = type_filter
         sub.volume = volume
         sub.repeat_interval = repeat_interval
-        sub.last_sent_at = None  # force immediate next update
+        sub.last_sent_at = None
         await session.commit()
         await session.refresh(sub)
         return sub
@@ -194,7 +193,6 @@ async def update_last_sent_at(sub_id: int) -> None:
 # ─── Sync versions (for Celery tasks) ────────────────────────
 
 def _get_sync_database_url() -> str:
-    """Convert asyncpg URL to sync psycopg2 URL."""
     if DATABASE_URL.startswith("postgresql+asyncpg://"):
         return DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
     return DATABASE_URL
@@ -205,7 +203,7 @@ _SyncSessionLocal = sessionmaker(bind=_sync_engine)
 
 
 def get_due_subscriptions_sync() -> list[dict]:
-    """Sync version – only active subscriptions."""
+    """Sync version – only active subscriptions (chat_id NOT NULL)."""
     now_min = now_minutes()
     session = _SyncSessionLocal()
     try:
@@ -236,7 +234,6 @@ def get_due_subscriptions_sync() -> list[dict]:
 
 
 def update_last_sent_at_sync(sub_id: int) -> None:
-    """Sync version."""
     now_min = now_minutes()
     session = _SyncSessionLocal()
     try:
@@ -250,7 +247,7 @@ def update_last_sent_at_sync(sub_id: int) -> None:
 
 
 async def save_subscription_settings(
-        user_id: int,
+        user_id: int | None,  # can now be None for manual rows
         provider: str | None = None,
         type_filter: str | None = None,
         volume: Decimal | None = None,
@@ -259,17 +256,17 @@ async def save_subscription_settings(
 ) -> Subscription:
     """
     Upsert subscription settings for a user.
-    If the row doesn't exist, create it with chat_id = NULL.
-    If it exists, update only the provided fields (skip None values).
+    If user_id is None, it creates a new row without a user (manual).
+    If a row exists with the same user_id, update it.
     """
     async with AsyncSessionLocal() as session:
-        # Try to get existing
-        stmt = select(Subscription).where(Subscription.user_id == user_id)
-        result = await session.execute(stmt)
-        sub = result.scalar_one_or_none()
+        existing = None
+        if user_id is not None:
+            stmt = select(Subscription).where(Subscription.user_id == user_id)
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
 
-        if sub is None:
-            # Create new pending subscription with defaults
+        if existing is None:
             sub = Subscription(
                 user_id=user_id,
                 chat_id=chat_id,  # can be None
@@ -285,16 +282,17 @@ async def save_subscription_settings(
         else:
             # Update only provided fields
             if provider is not None:
-                sub.provider = provider
+                existing.provider = provider
             if type_filter is not None:
-                sub.type_filter = type_filter
+                existing.type_filter = type_filter
             if volume is not None:
-                sub.volume = volume
+                existing.volume = volume
             if repeat_interval is not None:
-                sub.repeat_interval = repeat_interval
+                existing.repeat_interval = repeat_interval
             if chat_id is not None:
-                sub.chat_id = chat_id
+                existing.chat_id = chat_id
+            sub = existing  # <-- FIX: define sub so it's available below
 
         await session.commit()
         await session.refresh(sub)
-        return sub
+        return cast(Subscription, sub)
