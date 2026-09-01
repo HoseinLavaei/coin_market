@@ -4,23 +4,24 @@ Auto‑saves to DB immediately.
 """
 
 from decimal import Decimal
+from typing import Optional
 
-from telegram import Update
+from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_user_data, SELECT_VOLUME
+from db.subscription_repository import save_subscription_settings
+from .common import safe_edit, get_user_data, SELECT_VOLUME, get_current_subscription
 from .menus import build_volume_keyboard, build_numeric_keyboard
-from ...db.repositories.subscription_repository import save_subscription_settings
+from src.subscription_types import SubscriptionData
 
 
-async def show_volume(query, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def show_volume(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display volume selection menu with current selection shown."""
-    user_data = get_user_data(context)
-    sub = user_data.get("current_subscription", {})
-    current = sub.get("volume")
+    sub = get_current_subscription(context)
+    current: Optional[Decimal] = sub.volume if sub else None
 
     if current is not None:
-        text = f"📦 Selected volume: {current}\n\nSelect volume (or use Custom):"
+        text = f"📦 Selected volume: {format(current, 'f')}\n\nSelect volume (or use Custom):"
     else:
         text = "📦 Select volume (or use Custom):"
 
@@ -28,18 +29,37 @@ async def show_volume(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     return SELECT_VOLUME
 
 
-async def _save_volume(context: ContextTypes.DEFAULT_TYPE, value: Decimal | None) -> None:
-    """Save volume to DB and update user_data."""
+async def _save_volume(context: ContextTypes.DEFAULT_TYPE, value: Optional[Decimal]) -> None:
+    """Save volume to DB and update cached SubscriptionData."""
     user_data = get_user_data(context)
-    user_id: int | None = user_data.get("user_id")
+    user_id: Optional[int] = user_data.get("user_id")
     if not user_id:
         return
 
     await save_subscription_settings(user_id=user_id, volume=value)
 
-    sub = user_data.get("current_subscription", {})
-    sub["volume"] = value
-    user_data["current_subscription"] = sub
+    # Update cached SubscriptionData
+    sub = get_current_subscription(context)
+    if sub is not None:
+        updated = SubscriptionData(
+            id=sub.id,
+            chat_id=sub.chat_id,
+            provider=sub.provider,
+            type_filter=sub.type_filter,
+            volume=value,
+            repeat_interval=sub.repeat_interval,
+        )
+        user_data["current_subscription"] = updated
+    else:
+        # Should not happen, but create minimal one
+        user_data["current_subscription"] = SubscriptionData(
+            id=0,
+            chat_id=None,
+            provider=None,
+            type_filter=None,
+            volume=value,
+            repeat_interval=None,
+        )
 
 
 async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -79,9 +99,8 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # ─── Next ─────────────────────────────────────────────────
     if action == "next":
-        user_data = get_user_data(context)
-        sub = user_data.get("current_subscription", {})
-        if sub.get("volume") is None:
+        sub = get_current_subscription(context)
+        if sub is None or sub.volume is None:
             await safe_edit(
                 query,
                 "❌ Please select a volume or use 'Custom'.",

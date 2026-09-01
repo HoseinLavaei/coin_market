@@ -16,11 +16,11 @@ _initialised = False
 
 
 def setup_logging(
-    level: int = logging.INFO,
-    log_file: str = "app.log",
-    max_bytes: int = 5_000_000,
-    backup_count: int = 3,
-    console: bool = True,
+        level: int = logging.INFO,
+        log_file: str = "app.log",
+        max_bytes: int = 5_000_000,
+        backup_count: int = 3,
+        console: bool = True,
 ) -> None:
     """
     Configure the logging system. Must be called once at startup.
@@ -58,16 +58,15 @@ def setup_logging(
     root.addHandler(queue_handler)
 
     # ─── QueueListener (runs in background thread) ───────────
-    # Use a local variable to avoid type checker warnings
     listener = QueueListener(queue, *handlers)
     listener.start()
-    _listener = listener  # assign to global after starting
+    _listener = listener
 
     # ─── Configure our module logger ────────────────────────
     _logger.setLevel(level)
     _logger.handlers.clear()
     _logger.addHandler(queue_handler)
-    _logger.propagate = False  # Prevent double‑logging via root
+    _logger.propagate = False
 
     # ─── Suppress noisy third‑party loggers ──────────────────
     logging.getLogger("httpx").setLevel(logging.WARNING)

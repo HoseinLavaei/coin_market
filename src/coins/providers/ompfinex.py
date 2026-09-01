@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 from decimal import Decimal
+from typing import Optional, Any
 
 from .base import get_json
 from ..enums import ProviderName, Quote, Base
@@ -9,33 +10,42 @@ from ..models import OrderBooks, Coins, Coin, Order, OrderBook
 
 class OmpfinexProvider:
     """Fetches order book data from Ompfinex exchange. OTC is not supported."""
-    provider_name = ProviderName.OMPFINEX
+    provider_name: ProviderName = ProviderName.OMPFINEX
 
     @classmethod
     async def get_otc(cls, _quotes: list[Quote], _bases: list[Base]) -> Coins:
         return Coins()
 
     @classmethod
-    def _build_orders(cls, prices_data: list, quote: Quote, base: Base, now: datetime.datetime) -> list[Order]:
-        return [
-            Order(
-                coin=Coin(
-                    provider=cls.provider_name,
-                    base=base,
-                    quote=quote,
-                    raw_buy_price=Decimal(str(price)) / 10,
-                    raw_sell_price=Decimal(str(price)) / 10,
-                    buy_fee=Decimal(0.35),
-                    sell_fee=Decimal(0.35),
-                    timestamp=now,
-                ),
-                quantity=Decimal(str(amount)),
+    def _build_orders(
+            cls,
+            prices_data: list[list[Any]],
+            quote: Quote,
+            base: Base,
+            now: datetime.datetime,
+    ) -> list[Order]:
+        orders: list[Order] = []
+        for price, amount in prices_data:
+            try:
+                price_dec = Decimal(str(price)) / 10
+                amount_dec = Decimal(str(amount))
+            except (ValueError, TypeError):
+                continue
+            coin = Coin(
+                provider=cls.provider_name,
+                base=base,
+                quote=quote,
+                raw_buy_price=price_dec,
+                raw_sell_price=price_dec,
+                buy_fee=Decimal(0.35),
+                sell_fee=Decimal(0.35),
+                timestamp=now,
             )
-            for price, amount in prices_data
-        ]
+            orders.append(Order(coin=coin, quantity=amount_dec))
+        return orders
 
     @classmethod
-    def _get_quote_mapping(cls, quote: Quote) -> str | None:
+    def _get_quote_mapping(cls, quote: Quote) -> Optional[str]:
         if quote == Quote.TMN:
             return "IRR"
         if quote == Quote.USD:
@@ -53,7 +63,7 @@ class OmpfinexProvider:
         if data.get("status") != "OK":
             return {}
 
-        market_map = {}
+        market_map: dict[tuple[str, str], int] = {}
         for market in data.get("data", []):
             quote_id = market["quote_currency"]["id"]
             base_id = market["base_currency"]["id"]
@@ -62,10 +72,19 @@ class OmpfinexProvider:
         return market_map
 
     @classmethod
-    async def _fetch_single_orderbook(cls, semaphore: asyncio.Semaphore, mid: int, b: Base, q: Quote):
+    async def _fetch_single_orderbook(
+            cls,
+            semaphore: asyncio.Semaphore,
+            market_id: int,
+            base: Base,
+            quote: Quote,
+    ) -> Optional[tuple[tuple[Quote, Base], OrderBook]]:
         async with semaphore:
             try:
-                data = await get_json(f"https://api.ompfinex.com/v1/market/{mid}/depth", {"limit": "1000000"})
+                data = await get_json(
+                    f"https://api.ompfinex.com/v1/market/{market_id}/depth",
+                    {"limit": "1000000"},
+                )
             except (OSError, ValueError, TimeoutError):
                 return None
 
@@ -73,14 +92,18 @@ class OmpfinexProvider:
                 return None
 
             result_data = data.get("data", {})
-            bids_raw = result_data.get("bids", [])
-            asks_raw = result_data.get("asks", [])
-            now = datetime.datetime.now(datetime.timezone.utc)
+            bids_raw: list[list[Any]] = result_data.get("bids", [])
+            asks_raw: list[list[Any]] = result_data.get("asks", [])
+            if not bids_raw and not asks_raw:
+                return None
 
-            return (q, b), OrderBook(
-                asks=cls._build_orders(asks_raw, q, b, now),
-                bids=cls._build_orders(bids_raw, q, b, now),
-            )
+            now = datetime.datetime.now(datetime.timezone.utc)
+            bids = cls._build_orders(bids_raw, quote, base, now)
+            asks = cls._build_orders(asks_raw, quote, base, now)
+            if not bids and not asks:
+                return None
+
+            return (quote, base), OrderBook(asks=asks, bids=bids)
 
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
@@ -104,9 +127,9 @@ class OmpfinexProvider:
         results = await asyncio.gather(*tasks)
         final_result = OrderBooks()
 
-        for r in results:
-            if r is not None:
-                _, orderbook = r
+        for result in results:
+            if result is not None:
+                _, orderbook = result
                 final_result.upsert(orderbook)
 
         return final_result

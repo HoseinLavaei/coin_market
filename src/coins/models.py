@@ -2,6 +2,8 @@
 Pydantic models for market data: Coin, Order, OrderBook, Coins, OrderBooks.
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
 from decimal import Decimal
@@ -45,7 +47,7 @@ class Coin(BaseModel):
         buy_str, sell_str = self.get_formatted_price()
         return f"🟢 {buy_str} 🔴 {sell_str}"
 
-    def to_timezone(self) -> "Coin":
+    def to_timezone(self) -> Coin:
         """Convert timestamp to the project's configured timezone."""
         return self.model_copy(update={"timestamp": self.timestamp.astimezone(TIMEZONE)})
 
@@ -63,7 +65,7 @@ class Coin(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Coin":
+    def from_dict(cls, data: dict) -> Coin:
         """Deserialize from a dict produced by to_dict()."""
         return cls(
             provider=ProviderName[data["provider"]],
@@ -82,7 +84,7 @@ class Order(BaseModel):
     coin: Coin
     quantity: Decimal
 
-    def to_timezone(self) -> "Order":
+    def to_timezone(self) -> Order:
         """Recursively convert the order's timestamp to the configured timezone."""
         return Order(coin=self.coin.to_timezone(), quantity=self.quantity)
 
@@ -93,7 +95,7 @@ class Order(BaseModel):
         return {"coin": self.coin.to_dict(), "quantity": str(self.quantity)}
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Order":
+    def from_dict(cls, data: dict) -> Order:
         return cls(
             coin=Coin.from_dict(data["coin"]),
             quantity=Decimal(data["quantity"]),
@@ -175,7 +177,7 @@ class OrderBook(BaseModel):
             return self.bids[0].coin.base
         raise ValueError("Order book is empty")
 
-    def to_timezone(self) -> "OrderBook":
+    def to_timezone(self) -> OrderBook:
         """Recursively convert all orders' timestamps to the configured timezone."""
         return OrderBook(
             asks=[order.to_timezone() for order in self.asks],
@@ -202,7 +204,7 @@ class OrderBook(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "OrderBook":
+    def from_dict(cls, data: dict) -> OrderBook:
         return cls(
             asks=[Order.from_dict(order_data) for order_data in data["asks"]],
             bids=[Order.from_dict(order_data) for order_data in data["bids"]],
@@ -220,7 +222,7 @@ class Coins(BaseModel):
         """Add or replace a coin in the collection."""
         self.coins[(coin.provider, coin.quote, coin.base)] = coin
 
-    def to_timezone(self) -> "Coins":
+    def to_timezone(self) -> Coins:
         """Convert all coins' timestamps to the configured timezone."""
         result = Coins()
         for coin in self.coins.values():
@@ -237,7 +239,7 @@ class Coins(BaseModel):
         return json.dumps([coin.to_dict() for coin in self.coins.values()])
 
     @classmethod
-    def from_json(cls, json_str: str) -> "Coins":
+    def from_json(cls, json_str: str) -> Coins:
         coin_dicts = json.loads(json_str)
         coins = Coins()
         for coin_dict in coin_dicts:
@@ -256,7 +258,7 @@ class OrderBooks(BaseModel):
         """Add or replace an order book in the collection."""
         self.books[(book.get_provider(), book.get_quote(), book.get_base())] = book
 
-    def to_timezone(self) -> "OrderBooks":
+    def to_timezone(self) -> OrderBooks:
         """Convert all order books' timestamps to the configured timezone."""
         result = OrderBooks()
         for book in self.books.values():
@@ -279,7 +281,7 @@ class OrderBooks(BaseModel):
         return json.dumps([book.to_dict() for book in self.books.values()])
 
     @classmethod
-    def from_json(cls, json_str: str) -> "OrderBooks":
+    def from_json(cls, json_str: str) -> OrderBooks:
         book_dicts = json.loads(json_str)
         books = OrderBooks()
         for book_dict in book_dicts:

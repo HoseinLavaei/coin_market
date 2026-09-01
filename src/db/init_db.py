@@ -6,11 +6,11 @@ import urllib.parse
 
 import asyncpg
 
-import logger
+from src import logger
 from ..environment import DATABASE_URL
 
 
-async def init_db():
+async def init_db() -> None:
     try:
         parsed = urllib.parse.urlparse(DATABASE_URL)
         host = parsed.hostname
@@ -24,21 +24,22 @@ async def init_db():
         try:
             # Create unified subscriptions table if not exists
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS subscriptions (
-                    id              SERIAL PRIMARY KEY,
-                    user_id         BIGINT UNIQUE,                  -- NULL for manual channel subscriptions
-                    chat_id         BIGINT,                         -- NULL = pending
-                    provider        VARCHAR,
-                    type_filter     VARCHAR,
-                    volume          DECIMAL,
-                    repeat_interval INTEGER,
-                    last_sent_at    BIGINT,                         -- minutes since epoch
-                    activation_key  TEXT UNIQUE,                    -- NULL when active
-                    expires_at      BIGINT,                         -- seconds since epoch, NULL when active
-                    created_at      TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at      TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
+                               CREATE TABLE IF NOT EXISTS subscriptions
+                               (
+                                   id              SERIAL PRIMARY KEY,
+                                   user_id         BIGINT UNIQUE, -- NULL for manual channel subscriptions
+                                   chat_id         BIGINT,        -- NULL = pending
+                                   provider        VARCHAR,
+                                   type_filter     VARCHAR,
+                                   volume          DECIMAL,
+                                   repeat_interval INTEGER,
+                                   last_sent_at    BIGINT,        -- minutes since epoch
+                                   activation_key  TEXT UNIQUE,   -- NULL when active
+                                   expires_at      BIGINT,        -- seconds since epoch, NULL when active
+                                   created_at      TIMESTAMPTZ DEFAULT NOW(),
+                                   updated_at      TIMESTAMPTZ DEFAULT NOW()
+                               )
+                               """)
             logger.info("subscriptions table ready (created if not existed)")
 
             # Indexes – create if not exist
@@ -54,8 +55,8 @@ async def init_db():
 
             # ─── Fix sequence if out of sync ──────────────────────
             await conn.execute("""
-                SELECT setval('subscriptions_id_seq', COALESCE((SELECT MAX(id) FROM subscriptions), 1))
-            """)
+                               SELECT setval('subscriptions_id_seq', COALESCE((SELECT MAX(id) FROM subscriptions), 1))
+                               """)
             logger.info("Sequence synchronised")
 
         finally:

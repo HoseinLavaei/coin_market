@@ -8,18 +8,21 @@ import logging
 import signal
 import sys
 
-from telegram.ext import ContextTypes
+from telegram.ext import Application, ContextTypes
 
-import logger
+from src import logger
 from src.broadcast import run_broadcast_bot
 from src.control import run_control_bot
 from src.db import close_db
+from src.logger import shutdown_logging
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Global error handler for the bot."""
     logger.error(f"Update {update} caused error {context.error}")
 
-async def run_bot(app, name: str):
+
+async def run_bot(app: Application, name: str) -> None:
     """Run a bot with proper shutdown handling."""
     if app.updater is None:
         logger.error(f"Error: {name} updater is not available.")
@@ -28,7 +31,7 @@ async def run_bot(app, name: str):
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
-    def signal_handler():
+    def signal_handler() -> None:
         logger.info(f"Received termination signal, shutting down {name}...")
         shutdown_event.set()
 
@@ -55,11 +58,11 @@ async def run_bot(app, name: str):
     finally:
         await close_db()
         await app.shutdown()
-        logger.shutdown_logging()
+        shutdown_logging()
         logger.info(f"{name} stopped.")
 
 
-async def main():
+async def main() -> None:
     """Start Control and Broadcast bots."""
     logger.info("Initializing bots...")
     control_app = await run_control_bot()

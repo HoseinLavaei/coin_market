@@ -1,15 +1,18 @@
 import time
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlencode
 
 import httpx
 
-import logger
+from src import logger
 from ..enums import ProviderName, Quote, Base
 from ..models import OrderBooks, Coins
 
+# Type alias for JSON data
+JSON = dict[str, Any]
 
-async def get_json(url: str, params: dict[str, str] | None = None) -> dict:
+
+async def get_json(url: str, params: dict[str, str] | None = None) -> JSON:
     """
     Perform an HTTP GET request and return the parsed JSON response.
     Logs the elapsed time for each request.

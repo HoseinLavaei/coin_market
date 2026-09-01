@@ -4,13 +4,15 @@ Includes generic numeric keypad handler.
 """
 
 from decimal import Decimal
-from typing import cast
+from typing import cast, Optional, Union, Any
 
-from telegram import Update
+from telegram import InlineKeyboardMarkup
+from telegram import Update, CallbackQuery
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 from .menus import build_numeric_keyboard
+from src.subscription_types import SubscriptionData  # <-- added import
 
 # ─── Conversation States ─────────────────────────────────────
 MAIN_MENU, SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, SELECT_REPEAT, CONFIRM = range(6)
@@ -18,20 +20,28 @@ MAIN_MENU, SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, SELECT_REPEAT, CONFIRM =
 
 # ─── User Data helpers ──────────────────────────────────────
 
-def get_user_data(context: ContextTypes.DEFAULT_TYPE) -> dict:
+def get_user_data(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
     """Return user_data as a typed dict."""
-    return cast(dict, context.user_data)
+    return cast(dict[str, Any], context.user_data)
 
 
-def get_current_subscription(context: ContextTypes.DEFAULT_TYPE) -> dict | None:
+def get_current_subscription(context: ContextTypes.DEFAULT_TYPE) -> Optional[SubscriptionData]:
     """Get the current subscription from user_data (loaded from DB)."""
     user_data = get_user_data(context)
-    return user_data.get("current_subscription")
+    sub = user_data.get("current_subscription")
+    if isinstance(sub, SubscriptionData):
+        return sub
+    return None
 
 
 # ─── Safe Edit ─────────────────────────────────────────────
 
-async def safe_edit(query, text: str, reply_markup=None, parse_mode=None) -> None:
+async def safe_edit(
+        query: Optional[CallbackQuery],
+        text: str,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
+        parse_mode: Optional[str] = None,
+) -> None:
     """Edit message, ignoring 'Message is not modified' errors."""
     if query is None:
         return
@@ -47,7 +57,7 @@ async def safe_edit(query, text: str, reply_markup=None, parse_mode=None) -> Non
 # ─── Numeric Keypad Helpers ────────────────────────────────
 
 async def _update_numeric_display(
-        query,
+        query: CallbackQuery,
         num_buffer: str,
         num_field: str,
         include_negative: bool = False,
@@ -67,20 +77,20 @@ async def _update_numeric_display(
     )
 
 
-async def _handle_numeric_backspace(user_data: dict, num_buffer: str, state: int) -> int:
+async def _handle_numeric_backspace(user_data: dict[str, Any], num_buffer: str, state: int) -> int:
     num_buffer = num_buffer[:-1]
     user_data["num_buffer"] = num_buffer
     return state
 
 
-async def _handle_numeric_dot(user_data: dict, num_buffer: str, state: int) -> int:
+async def _handle_numeric_dot(user_data: dict[str, Any], num_buffer: str, state: int) -> int:
     if "." not in num_buffer:
         num_buffer += "."
     user_data["num_buffer"] = num_buffer
     return state
 
 
-async def _handle_numeric_negative(user_data: dict, num_buffer: str, state: int) -> int:
+async def _handle_numeric_negative(user_data: dict[str, Any], num_buffer: str, state: int) -> int:
     if num_buffer == "":
         num_buffer = "-"
     elif num_buffer.startswith("-"):
@@ -91,7 +101,7 @@ async def _handle_numeric_negative(user_data: dict, num_buffer: str, state: int)
     return state
 
 
-async def _handle_numeric_digit(user_data: dict, num_buffer: str, digit: str, state: int) -> int:
+async def _handle_numeric_digit(user_data: dict[str, Any], num_buffer: str, digit: str, state: int) -> int:
     num_buffer += digit
     user_data["num_buffer"] = num_buffer
     return state
@@ -100,24 +110,40 @@ async def _handle_numeric_digit(user_data: dict, num_buffer: str, digit: str, st
 async def _save_numeric_value(
         user_id: int,
         num_field: str,
-        value: Decimal | int,
-        user_data: dict,
+        value: Union[Decimal, int],
+        user_data: dict[str, Any],
 ) -> None:
     """Save the numeric value to the database and update user_data."""
-    from ...db.repositories.subscription_repository import save_subscription_settings
+    from db.subscription_repository import save_subscription_settings
 
     if num_field == "volume":
-        # mypy can't infer that value is Decimal here, but we know it
         await save_subscription_settings(user_id=user_id, volume=value)  # type: ignore[arg-type]
-        if user_data.get("current_subscription"):
-            user_data["current_subscription"]["volume"] = value
+        sub = user_data.get("current_subscription")
+        if isinstance(sub, SubscriptionData):
+            # Update the volume in the cached subscription data
+            user_data["current_subscription"] = SubscriptionData(
+                id=sub.id,
+                chat_id=sub.chat_id,
+                provider=sub.provider,
+                type_filter=sub.type_filter,
+                volume=value,  # type: ignore[arg-type] # Decimal
+                repeat_interval=sub.repeat_interval,
+            )
     elif num_field == "repeat":
         await save_subscription_settings(user_id=user_id, repeat_interval=value)  # type: ignore[arg-type]
-        if user_data.get("current_subscription"):
-            user_data["current_subscription"]["repeat_interval"] = value
+        sub = user_data.get("current_subscription")
+        if isinstance(sub, SubscriptionData):
+            user_data["current_subscription"] = SubscriptionData(
+                id=sub.id,
+                chat_id=sub.chat_id,
+                provider=sub.provider,
+                type_filter=sub.type_filter,
+                volume=sub.volume,
+                repeat_interval=value,  # type: ignore[arg-type] # int
+            )
 
 
-def _validate_and_parse_numeric(num_buffer: str, num_field: str) -> Decimal | int | None:
+def _validate_and_parse_numeric(num_buffer: str, num_field: str) -> Optional[Union[Decimal, int]]:
     """Parse and validate numeric input for volume or repeat."""
     try:
         if num_field == "volume":
@@ -137,9 +163,9 @@ def _validate_and_parse_numeric(num_buffer: str, num_field: str) -> Decimal | in
 
 
 async def _handle_numeric_confirm(
-        query,
+        query: CallbackQuery,
         context: ContextTypes.DEFAULT_TYPE,
-        user_data: dict,
+        user_data: dict[str, Any],
         num_buffer: str,
         num_field: str,
         state: int,
@@ -211,7 +237,7 @@ async def handle_numeric_input(
         result = await _handle_numeric_negative(user_data, num_buffer, state)
     elif action == "next":
         result = await _handle_numeric_confirm(query, context, user_data, num_buffer, num_field, state)
-        return result  # Don't try to update display again
+        return result
     elif action == "back":
         user_data.pop("num_buffer", None)
         user_data.pop("num_field", None)
@@ -226,7 +252,6 @@ async def handle_numeric_input(
     else:
         return state
 
-    # ─── Update display if we're still in the numeric state ──
     if result == state:
         updated_buffer = user_data.get("num_buffer", "")
         await _update_numeric_display(

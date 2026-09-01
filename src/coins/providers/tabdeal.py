@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 from decimal import Decimal
+from typing import Optional, Any
 
 from .base import get_json
 from ..enums import ProviderName, Quote, Base
@@ -9,10 +10,10 @@ from ..models import OrderBooks, Coins, Coin, Order, OrderBook
 
 class TabdealProvider:
     """Fetches OTC and order book data from Tabdeal exchange."""
-    provider_name = ProviderName.TABDEAL
+    provider_name: ProviderName = ProviderName.TABDEAL
 
     @classmethod
-    def _get_quote_mapping(cls, quote: Quote) -> str | None:
+    def _get_quote_mapping(cls, quote: Quote) -> Optional[str]:
         if quote == Quote.TMN:
             return "IRT"
         if quote == Quote.USD:
@@ -26,22 +27,26 @@ class TabdealProvider:
     @classmethod
     def _build_order_list(
             cls,
-            entries: list,
-            q: Quote,
-            b: Base,
+            entries: list[list[Any]],
+            quote: Quote,
+            base: Base,
             now: datetime.datetime,
             reverse: bool = False,
     ) -> list[Order]:
-        orders = []
-
+        orders: list[Order] = []
         for entry in entries:
-            price = Decimal(str(entry[0]))
-            amount = Decimal(str(entry[1]))
+            if len(entry) < 2:
+                continue
+            try:
+                price = Decimal(str(entry[0]))
+                amount = Decimal(str(entry[1]))
+            except (ValueError, TypeError):
+                continue
 
             coin = Coin(
                 provider=cls.provider_name,
-                base=b,
-                quote=q,
+                base=base,
+                quote=quote,
                 raw_buy_price=price,
                 raw_sell_price=price,
                 buy_fee=Decimal("0.35"),
@@ -58,13 +63,14 @@ class TabdealProvider:
         result = OrderBooks()
         semaphore = asyncio.Semaphore(5)
 
-        async def fetch_pair(q: Quote, b: Base):
-            # Build symbol from base and quote
-            quote_mapping = cls._get_quote_mapping(q)
+        async def fetch_pair(
+                quote: Quote,
+                base: Base,
+        ) -> Optional[tuple[tuple[Quote, Base], OrderBook]]:
+            quote_mapping = cls._get_quote_mapping(quote)
             if quote_mapping is None:
                 return None
-            quote_str = quote_mapping
-            symbol = f"{b.value}{quote_str}"
+            symbol = f"{base.value}{quote_mapping}"
             url = "https://api1.tabdeal.org/r/api/v1/depth"
             params = {"symbol": symbol}
 
@@ -74,29 +80,25 @@ class TabdealProvider:
                 except (OSError, ValueError, TimeoutError):
                     return None
 
-                asks_raw = data.get("asks", [])
-                bids_raw = data.get("bids", [])
-
+                asks_raw: list[list[Any]] = data.get("asks", [])
+                bids_raw: list[list[Any]] = data.get("bids", [])
                 if not asks_raw and not bids_raw:
                     return None
 
                 now = datetime.datetime.now(datetime.timezone.utc)
+                bids = cls._build_order_list(bids_raw, quote, base, now, reverse=True)
+                asks = cls._build_order_list(asks_raw, quote, base, now, reverse=False)
+                if not bids and not asks:
+                    return None
 
-                return (q, b), OrderBook(
-                    asks=cls._build_order_list(asks_raw, q, b, now, reverse=False),
-                    bids=cls._build_order_list(bids_raw, q, b, now, reverse=True),
-                )
+                return (quote, base), OrderBook(asks=asks, bids=bids)
 
-        tasks = []
-        for quote in quotes:
-            for base in bases:
-                tasks.append(fetch_pair(quote, base))
-
+        tasks = [fetch_pair(q, b) for q in quotes for b in bases]
         results = await asyncio.gather(*tasks)
 
-        for r in results:
-            if r is not None:
-                _, orderbook = r
+        for item in results:
+            if item is not None:
+                _, orderbook = item
                 result.upsert(orderbook)
 
         return result

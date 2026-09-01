@@ -2,11 +2,14 @@
 Broadcast bot command handlers.
 """
 
+from telegram import Update
+from telegram.ext import ContextTypes
+
 from ..coins import build_subscription_description
-from ..db import claim_subscription_by_key  # unified function
+from ..db import claim_subscription_by_key
 
 
-async def handle_start(update, context):
+async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle /start command:
     - If a key is provided (e.g., /start 123456), activate subscription.
@@ -34,7 +37,6 @@ async def handle_start(update, context):
 
     chat_id = chat.id
 
-    # ─── Claim the pending subscription (unified table) ──────
     data = await claim_subscription_by_key(key, chat_id)
     if data is None:
         await message.reply_text(
@@ -42,7 +44,6 @@ async def handle_start(update, context):
         )
         return
 
-    # ─── Confirm activation ──────────────────────────────────
     filter_desc = build_subscription_description(
         data["volume"],
         data["repeat_interval"],

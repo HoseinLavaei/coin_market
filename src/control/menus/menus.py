@@ -156,3 +156,11 @@ def build_numeric_keyboard(
     ])
 
     return InlineKeyboardMarkup(buttons)
+
+
+def build_activation_keyboard(url: str) -> InlineKeyboardMarkup:
+    """Build a keyboard with a single button that opens the activation URL."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Activate Now", url=url)],
+        [InlineKeyboardButton("❌ Cancel", callback_data="activation:cancel")],
+    ])

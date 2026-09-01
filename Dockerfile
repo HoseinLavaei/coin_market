@@ -9,13 +9,14 @@ ENV PYTHONUNBUFFERED=1
 
 # Copy project files for installation
 COPY pyproject.toml README.md /app/
-COPY src /app/src
+
+RUN mkdir /app/src
 
 # Install dependencies (all are now in pyproject.toml, no need to repeat)
 RUN pip install --no-cache-dir .
 
-# Copy the rest of the files
-COPY . /app
+COPY src /app/src
+COPY scheduler /app/scheduler
 
 # Run main.py when the container launches
 CMD ["python", "-m", "src.main"]

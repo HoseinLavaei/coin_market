@@ -12,7 +12,7 @@ from .helpers import now_minutes, now_seconds
 from .models import Subscription
 
 # ─── Repositories ───────────────────────────────────────────
-from .repositories import (
+from .subscription_repository import (
     get_subscription_for_user,
     update_last_sent_at,
     delete_subscription,

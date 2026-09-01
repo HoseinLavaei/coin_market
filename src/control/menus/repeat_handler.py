@@ -3,29 +3,30 @@ Repeat interval selection handler.
 Auto‑saves to DB immediately.
 """
 
-from telegram import Update
+from typing import Optional
+
+from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes, ConversationHandler
 
+from db.subscription_repository import save_subscription_settings
 from .common import (
     safe_edit,
     get_user_data,
     handle_numeric_input,
     SELECT_REPEAT,
+    get_current_subscription,
 )
 from .menus import build_repeat_keyboard, build_numeric_keyboard
-from ...db.repositories.subscription_repository import save_subscription_settings
+from src.subscription_types import SubscriptionData
 
 
-async def show_repeat(query, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def show_repeat(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display repeat interval selection menu with current selection shown."""
     user_data = get_user_data(context)
-    sub = user_data.get("current_subscription", {})
-    current = sub.get("repeat_interval")
+    sub = get_current_subscription(context)
     is_new = user_data.get("is_new", False)
 
-    # Ensure current is int | None (not Any)
-    if not isinstance(current, int):
-        current = None
+    current: Optional[int] = sub.repeat_interval if sub else None
 
     if current is not None:
         label = f"{current}m"
@@ -37,18 +38,37 @@ async def show_repeat(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     return SELECT_REPEAT
 
 
-async def _save_repeat(context: ContextTypes.DEFAULT_TYPE, value: int | None) -> None:
+async def _save_repeat(context: ContextTypes.DEFAULT_TYPE, value: Optional[int]) -> None:
     """Save repeat interval to DB and update user_data."""
     user_data = get_user_data(context)
-    user_id: int | None = user_data.get("user_id")
+    user_id: Optional[int] = user_data.get("user_id")
     if not user_id:
         return
 
     await save_subscription_settings(user_id=user_id, repeat_interval=value)
 
-    sub = user_data.get("current_subscription", {})
-    sub["repeat_interval"] = value
-    user_data["current_subscription"] = sub
+    # Update cached SubscriptionData
+    sub = get_current_subscription(context)
+    if sub is not None:
+        updated_sub = SubscriptionData(
+            id=sub.id,
+            chat_id=sub.chat_id,
+            provider=sub.provider,
+            type_filter=sub.type_filter,
+            volume=sub.volume,
+            repeat_interval=value,
+        )
+        user_data["current_subscription"] = updated_sub
+    else:
+        # Should not happen, but create a minimal one
+        user_data["current_subscription"] = SubscriptionData(
+            id=0,
+            chat_id=None,
+            provider=None,
+            type_filter=None,
+            volume=None,
+            repeat_interval=value,
+        )
 
 
 async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -89,10 +109,8 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     # ─── Next ─────────────────────────────────────────────────
     if action == "next":
-        sub = user_data.get("current_subscription", {})
-        current = sub.get("repeat_interval")
-        if not isinstance(current, int):
-            current = None
+        sub = get_current_subscription(context)
+        current = sub.repeat_interval if sub else None
 
         if current is None:
             await safe_edit(
@@ -102,7 +120,6 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return SELECT_REPEAT
 
-        # New user – go to confirmation screen
         from .confirm_handler import show_confirm
         return await show_confirm(query, context)
 

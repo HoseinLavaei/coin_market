@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 from decimal import Decimal
+from typing import Optional, Any
 
 from .base import get_json
 from ..enums import ProviderName, Quote, Base
@@ -9,10 +10,16 @@ from ..models import OrderBooks, Coins, Coin, Order, OrderBook
 
 class NobitexProvider:
     """Fetches OTC and order book data from Nobitex exchange."""
-    provider_name = ProviderName.NOBITEX
+    provider_name: ProviderName = ProviderName.NOBITEX
 
     @classmethod
-    def _parse_market_data(cls, market_key: str, market_data: dict, bases: list[Base], quote: Quote) -> Coin | None:
+    def _parse_market_data(
+            cls,
+            market_key: str,
+            market_data: dict[str, Any],
+            bases: list[Base],
+            quote: Quote,
+    ) -> Optional[Coin]:
         base_str = market_key.split("-")[0].upper()
         try:
             base = Base(base_str)
@@ -70,7 +77,10 @@ class NobitexProvider:
         result = OrderBooks()
         semaphore = asyncio.Semaphore(5)
 
-        async def fetch_pair(quote: Quote, base: Base):
+        async def fetch_pair(
+                quote: Quote,
+                base: Base,
+        ) -> Optional[tuple[tuple[Quote, Base], OrderBook]]:
             quote_str = "IRT" if quote == Quote.TMN else "USDT"
             pair = f"{base.value}{quote_str}"
 
@@ -79,32 +89,37 @@ class NobitexProvider:
                 if data.get("status") != "ok":
                     return None
 
-                bids_raw = data.get("bids", [])
-                asks_raw = data.get("asks", [])
+                bids_raw: list[list[Any]] = data.get("bids", [])
+                asks_raw: list[list[Any]] = data.get("asks", [])
                 now = datetime.datetime.now(datetime.timezone.utc)
 
-                def build_orders(raw) -> list[Order]:
-                    return [
-                        Order(
-                            coin=Coin(
-                                provider=cls.provider_name,
-                                base=base,
-                                quote=quote,
-                                raw_buy_price=Decimal(str(price)) / 10,
-                                raw_sell_price=Decimal(str(price)) / 10,
-                                buy_fee=Decimal(0.25),
-                                sell_fee=Decimal(0.25),
-                                timestamp=now,
-                            ),
-                            quantity=Decimal(str(amount)),
+                def build_orders(raw: list[list[Any]]) -> list[Order]:
+                    orders = []
+                    for price, amount in raw:
+                        try:
+                            price_dec = Decimal(str(price)) / 10
+                            amount_dec = Decimal(str(amount))
+                        except (ValueError, TypeError):
+                            continue
+                        coin = Coin(
+                            provider=cls.provider_name,
+                            base=base,
+                            quote=quote,
+                            raw_buy_price=price_dec,
+                            raw_sell_price=price_dec,
+                            buy_fee=Decimal(0.25),
+                            sell_fee=Decimal(0.25),
+                            timestamp=now,
                         )
-                        for price, amount in raw
-                    ]
+                        orders.append(Order(coin=coin, quantity=amount_dec))
+                    return orders
 
-                return (quote, base), OrderBook(
-                    asks=build_orders(asks_raw),
-                    bids=build_orders(bids_raw),
-                )
+                bids = build_orders(bids_raw)
+                asks = build_orders(asks_raw)
+                if not bids and not asks:
+                    return None
+
+                return (quote, base), OrderBook(asks=asks, bids=bids)
 
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)

@@ -3,13 +3,16 @@ Selection handlers for provider and type steps.
 Auto‑saves to DB immediately.
 """
 
-from telegram import Update
+from typing import Optional
+
+from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .common import safe_edit, get_user_data, SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME
+from db.subscription_repository import save_subscription_settings
+from .common import safe_edit, get_user_data, SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, get_current_subscription
 from .menus import build_provider_keyboard, build_type_keyboard
 from ...coins import ProviderName
-from ...db.repositories.subscription_repository import save_subscription_settings
+from src.subscription_types import SubscriptionData
 
 
 # ─── Internal helpers ──────────────────────────────────────
@@ -38,18 +41,14 @@ def _get_config(prefix: str) -> dict:
     return {}
 
 
-def _get_current_values(sub: dict, field: str) -> list[str]:
-    """Get current values from subscription dict."""
+def _get_current_values(sub: Optional[SubscriptionData], field: str) -> list[str]:
+    """Get current values from SubscriptionData."""
+    if sub is None:
+        return []
     if field == "provider":
-        val: str | None = sub.get("provider")
-        if val is not None:
-            return val.split(",")
-        return []
+        return sub.provider.split(",") if sub.provider else []
     elif field == "type_filter":
-        val: str | None = sub.get("type_filter")
-        if val is not None:
-            return val.split(",")
-        return []
+        return sub.type_filter.split(",") if sub.type_filter else []
     return []
 
 
@@ -59,48 +58,77 @@ def _render_text(_field: str, items: list[str], label: str) -> str:
     return f"{label} ({count} selected: {selected_names}) – toggle each, or use All/Clear"
 
 
-# ─── Entry point for showing a selection step ──────────────
+# ─── Shared display updater ──────────────────────────────────
 
-async def show_selection(query, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
-    config = _get_config(prefix)
-    if not config:
-        return ConversationHandler.END
-
-    user_data = get_user_data(context)
-    sub = user_data.get("current_subscription", {})
-    items = _get_current_values(sub, config["field"])
-
+async def _update_selection_display(
+    query: CallbackQuery,
+    _context: ContextTypes.DEFAULT_TYPE,
+    config: dict,
+    items: list[str],
+) -> int:
+    """Update the selection message with current items and return the state."""
     text = _render_text(config["field"], items, config["label"])
     await safe_edit(query, text, reply_markup=config["builder"](items))
     return config["state"]
 
 
-# ─── Handlers for specific actions ──────────────────────────
+# ─── Entry point for showing a selection step ──────────────
 
-async def _save_to_db(context: ContextTypes.DEFAULT_TYPE, save_field: str, value: str | None) -> None:
-    """Save a single field to the database."""
-    user_data = get_user_data(context)
-    user_id = user_data.get("user_id")
-
-    if not isinstance(user_id, int):
-        return
-
-    kwargs = {save_field: value}
-    await save_subscription_settings(user_id=user_id, **kwargs)
-
-    # Update current_subscription in user_data
-    sub = user_data.get("current_subscription", {})
-    sub[save_field] = value
-    user_data["current_subscription"] = sub
-
-
-async def _handle_toggle(query, context: ContextTypes.DEFAULT_TYPE, prefix: str, name: str) -> int:
+async def show_selection(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
     config = _get_config(prefix)
     if not config:
         return ConversationHandler.END
 
+    sub = get_current_subscription(context)
+    items = _get_current_values(sub, config["field"])
+    return await _update_selection_display(query, context, config, items)
+
+
+# ─── Handlers for specific actions ──────────────────────────
+
+async def _save_to_db(context: ContextTypes.DEFAULT_TYPE, save_field: str, value: Optional[str]) -> None:
+    """Save a single field to the database and update cached SubscriptionData."""
     user_data = get_user_data(context)
-    sub = user_data.get("current_subscription", {})
+    user_id = user_data.get("user_id")
+    if not isinstance(user_id, int):
+        return
+
+    # Save to DB
+    await save_subscription_settings(user_id=user_id, **{save_field: value})
+
+    # Update cached SubscriptionData
+    sub = get_current_subscription(context)
+    if sub is not None:
+        # Build updated object
+        if save_field == "provider":
+            updated = SubscriptionData(
+                id=sub.id,
+                chat_id=sub.chat_id,
+                provider=value,
+                type_filter=sub.type_filter,
+                volume=sub.volume,
+                repeat_interval=sub.repeat_interval,
+            )
+        elif save_field == "type_filter":
+            updated = SubscriptionData(
+                id=sub.id,
+                chat_id=sub.chat_id,
+                provider=sub.provider,
+                type_filter=value,
+                volume=sub.volume,
+                repeat_interval=sub.repeat_interval,
+            )
+        else:
+            return
+        user_data["current_subscription"] = updated
+
+
+async def _handle_toggle(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, prefix: str, name: str) -> int:
+    config = _get_config(prefix)
+    if not config:
+        return ConversationHandler.END
+
+    sub = get_current_subscription(context)
     items = _get_current_values(sub, config["field"])
 
     if name in items:
@@ -108,45 +136,31 @@ async def _handle_toggle(query, context: ContextTypes.DEFAULT_TYPE, prefix: str,
     else:
         items.append(name)
 
-    # Save to DB immediately
     value = ",".join(items) if items else None
     await _save_to_db(context, config["save_field"], value)
 
-    # Update display
-    text = _render_text(config["field"], items, config["label"])
-    await safe_edit(query, text, reply_markup=config["builder"](items))
-    return config["state"]
+    return await _update_selection_display(query, context, config, items)
 
 
-async def _handle_all(query, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
+async def _handle_all(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
     config = _get_config(prefix)
     if not config:
         return ConversationHandler.END
 
     items = config["all_items"][:]
-
-    # Save to DB immediately
     value = ",".join(items) if items else None
     await _save_to_db(context, config["save_field"], value)
 
-    text = _render_text(config["field"], items, config["label"])
-    await safe_edit(query, text, reply_markup=config["builder"](items))
-    return config["state"]
+    return await _update_selection_display(query, context, config, items)
 
 
-async def _handle_clear(query, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
+async def _handle_clear(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
     config = _get_config(prefix)
     if not config:
         return ConversationHandler.END
 
-    items = []
-
-    # Save to DB immediately
     await _save_to_db(context, config["save_field"], None)
-
-    text = _render_text(config["field"], items, config["label"])
-    await safe_edit(query, text, reply_markup=config["builder"](items))
-    return config["state"]
+    return await _update_selection_display(query, context, config, [])
 
 
 async def _handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
@@ -159,12 +173,10 @@ async def _handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE, prefi
     if not query:
         return ConversationHandler.END
 
-    # For providers, go to main menu (Back button doesn't exist here)
     if prefix == "prov":
         from .control_menus import show_main_menu
         return await show_main_menu(query, context)
     else:
-        # prefix == "type" – go back to providers
         return await show_selection(query, context, "prov")
 
 
@@ -177,8 +189,7 @@ async def _handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE, prefi
     if not config:
         return ConversationHandler.END
 
-    user_data = get_user_data(context)
-    sub = user_data.get("current_subscription", {})
+    sub = get_current_subscription(context)
     items = _get_current_values(sub, config["field"])
 
     if not items:
@@ -192,12 +203,11 @@ async def _handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE, prefi
     if prefix == "prov":
         return await show_selection(query, context, "type")
     else:
-        # prefix == "type"
         from .volume_handler import show_volume
         return await show_volume(query, context)
 
 
-async def _handle_menu(query, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def _handle_menu(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Return to main menu."""
     from .control_menus import show_main_menu
     return await show_main_menu(query, context)
@@ -219,7 +229,6 @@ async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not data:
         return ConversationHandler.END
 
-    # ─── Toggle ──────────────────────────────────────────────
     if data.startswith("prov_toggle:"):
         name = data.split(":", 1)[1]
         return await _handle_toggle(query, context, "prov", name)
@@ -228,7 +237,6 @@ async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         name = data.split(":", 1)[1]
         return await _handle_toggle(query, context, "type", name)
 
-    # ─── Other actions ──────────────────────────────────────
     parts = data.split(":", 1)
     if len(parts) < 2:
         return ConversationHandler.END
