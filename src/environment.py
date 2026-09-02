@@ -24,6 +24,5 @@ REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # ─── Other settings ─────────────────────────────────────────
 INTERVAL: int = int(os.getenv("INTERVAL", "60"))
-KEY_EXPIRY_SECONDS: int = int(os.getenv("KEY_EXPIRY_SECONDS", "300"))
 TIMEZONE: ZoneInfo = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
 BROADCAST_BOT_USERNAME: str = os.getenv("BROADCAST_BOT_USERNAME", "coin_market_monitor_bot")

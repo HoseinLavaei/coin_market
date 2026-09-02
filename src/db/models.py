@@ -2,7 +2,6 @@
 SQLAlchemy ORM models – only one table: subscriptions.
 """
 
-from datetime import datetime
 from decimal import Decimal
 
 import sqlalchemy as sa
@@ -25,11 +24,6 @@ class Subscription(Base):
     repeat_interval: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)  # minutes
     last_sent_at: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)  # minutes since epoch
     activation_key: Mapped[str | None] = mapped_column(sa.String, nullable=True, unique=True)
-    expires_at: Mapped[int | None] = mapped_column(sa.BigInteger, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), default=datetime.now, onupdate=datetime.now
-    )
 
     __table_args__ = (
         CheckConstraint("repeat_interval > 0", name="check_repeat_interval_positive"),

@@ -3,31 +3,35 @@ Inline keyboard builders for the subscription flow.
 """
 
 from decimal import Decimal
+from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from ...coins import ProviderName
+from ...environment import BROADCAST_BOT_USERNAME
 
 
-# ─── Main Menu Keyboard ─────────────────────────────────────
-
-def build_main_menu_keyboard(show_done: bool = False) -> InlineKeyboardMarkup:
-    """Build the main menu dashboard keyboard."""
+def build_main_menu_keyboard(
+        show_confirm: bool = False,
+        activation_key: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton("🏛️ Select Providers", callback_data="menu:providers")],
         [InlineKeyboardButton("📊 Select Types", callback_data="menu:types")],
         [InlineKeyboardButton("💰 Set Volume", callback_data="menu:volume")],
         [InlineKeyboardButton("🔄 Set Repeat", callback_data="menu:repeat")],
     ]
-    if show_done:
-        keyboard.append([InlineKeyboardButton("✅ Done", callback_data="menu:done")])
+    if show_confirm and activation_key:
+        link = f"https://t.me/{BROADCAST_BOT_USERNAME}?start={activation_key}"
+        keyboard.append([InlineKeyboardButton("✅ Confirm", url=link)])
     return InlineKeyboardMarkup(keyboard)
 
 
-# ─── Provider Keyboard ─────────────────────────────────────
-# NO BACK BUTTON (first step)
-
-def build_provider_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
+def build_provider_keyboard(
+        selected: list[str],
+        show_confirm: bool = False,
+        activation_key: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     buttons = []
     for p in ProviderName:
         name = p.value
@@ -40,15 +44,23 @@ def build_provider_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
     ])
 
     buttons.append([
+        InlineKeyboardButton("🔙 Back", callback_data="prov:back"),
         InlineKeyboardButton("🏠 Menu", callback_data="prov:menu"),
         InlineKeyboardButton("➡️ Next", callback_data="prov:next"),
     ])
+
+    if show_confirm and activation_key:
+        link = f"https://t.me/{BROADCAST_BOT_USERNAME}?start={activation_key}"
+        buttons.append([InlineKeyboardButton("✅ Confirm", url=link)])
+
     return InlineKeyboardMarkup(buttons)
 
 
-# ─── Type Keyboard ──────────────────────────────────────────
-
-def build_type_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
+def build_type_keyboard(
+        selected: list[str],
+        show_confirm: bool = False,
+        activation_key: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     buttons = []
     for opt in ["OTC", "P2P"]:
         checked = "✅ " if opt in selected else ""
@@ -65,12 +77,19 @@ def build_type_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🏠 Menu", callback_data="type:menu"),
         InlineKeyboardButton("➡️ Next", callback_data="type:next"),
     ])
+
+    if show_confirm and activation_key:
+        link = f"https://t.me/{BROADCAST_BOT_USERNAME}?start={activation_key}"
+        buttons.append([InlineKeyboardButton("✅ Confirm", url=link)])
+
     return InlineKeyboardMarkup(buttons)
 
 
-# ─── Volume Keyboard ────────────────────────────────────────
-
-def build_volume_keyboard(current: Decimal | None) -> InlineKeyboardMarkup:
+def build_volume_keyboard(
+        current: Decimal | None,
+        show_confirm: bool = False,
+        activation_key: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     presets = [1, 10, 100, 1000]
     buttons = []
     for v in presets:
@@ -84,15 +103,20 @@ def build_volume_keyboard(current: Decimal | None) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🏠 Menu", callback_data="vol:menu"),
         InlineKeyboardButton("➡️ Next", callback_data="vol:next"),
     ])
+
+    if show_confirm and activation_key:
+        link = f"https://t.me/{BROADCAST_BOT_USERNAME}?start={activation_key}"
+        buttons.append([InlineKeyboardButton("✅ Confirm", url=link)])
+
     return InlineKeyboardMarkup(buttons)
 
 
-# ─── Repeat Keyboard ────────────────────────────────────────
-# Next button only shown for new users (show_next parameter)
-
-def build_repeat_keyboard(current: int | None, show_next: bool = True) -> InlineKeyboardMarkup:
-    """Build repeat keyboard with options in minutes."""
-    presets = [1, 2, 5, 10, 30, 60]  # minutes
+def build_repeat_keyboard(
+        current: int | None,
+        show_confirm: bool = False,
+        activation_key: Optional[str] = None,
+) -> InlineKeyboardMarkup:
+    presets = [1, 2, 5, 10, 30, 60]
     buttons = []
     for minutes in presets:
         label = f"{minutes}m" if minutes >= 1 else f"{minutes}s"
@@ -101,27 +125,16 @@ def build_repeat_keyboard(current: int | None, show_next: bool = True) -> Inline
 
     buttons.append([InlineKeyboardButton("✏️ Custom", callback_data="rep:custom")])
 
-    # Row with Back, Menu, and optionally Next
-    row = [
+    buttons.append([
         InlineKeyboardButton("🔙 Back", callback_data="rep:back"),
         InlineKeyboardButton("🏠 Menu", callback_data="rep:menu"),
-    ]
-    if show_next:
-        row.append(InlineKeyboardButton("➡️ Next", callback_data="rep:next"))
-    buttons.append(row)
+        InlineKeyboardButton("➡️ Next", callback_data="rep:next"),
+    ])
 
-    return InlineKeyboardMarkup(buttons)
+    if show_confirm and activation_key:
+        link = f"https://t.me/{BROADCAST_BOT_USERNAME}?start={activation_key}"
+        buttons.append([InlineKeyboardButton("✅ Confirm", url=link)])
 
-
-# ─── Confirm Keyboard ───────────────────────────────────────
-
-def build_confirm_keyboard() -> InlineKeyboardMarkup:
-    buttons = [
-        [
-            InlineKeyboardButton("🔙 Back", callback_data="confirm:back"),
-            InlineKeyboardButton("✅ Confirm", callback_data="confirm:confirm"),
-        ],
-    ]
     return InlineKeyboardMarkup(buttons)
 
 
@@ -132,14 +145,12 @@ def build_numeric_keyboard(
         allow_decimal: bool = False,
 ) -> InlineKeyboardMarkup:
     buttons = []
-    # First three rows: 1-9
     for i in range(1, 10, 3):
         row = []
         for j in range(i, i + 3):
             row.append(InlineKeyboardButton(str(j), callback_data=f"num:{j}"))
         buttons.append(row)
 
-    # Row 4: dynamic buttons
     row4 = []
     if include_negative:
         row4.append(InlineKeyboardButton("±", callback_data="num:negative"))
@@ -149,18 +160,9 @@ def build_numeric_keyboard(
     row4.append(InlineKeyboardButton("⌫", callback_data="num:backspace"))
     buttons.append(row4)
 
-    # Row 5: Back, Next (no Cancel, no Menu)
     buttons.append([
         InlineKeyboardButton("🔙 Back", callback_data="num:back"),
         InlineKeyboardButton("➡️ Next", callback_data="num:next"),
     ])
 
     return InlineKeyboardMarkup(buttons)
-
-
-def build_activation_keyboard(url: str) -> InlineKeyboardMarkup:
-    """Build a keyboard with a single button that opens the activation URL."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Activate Now", url=url)],
-        [InlineKeyboardButton("❌ Cancel", callback_data="activation:cancel")],
-    ])

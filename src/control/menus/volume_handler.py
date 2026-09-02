@@ -10,27 +10,46 @@ from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes, ConversationHandler
 
 from db.subscription_repository import save_subscription_settings
+from src.subscription_types import SubscriptionData
 from .common import safe_edit, get_user_data, SELECT_VOLUME, get_current_subscription
 from .menus import build_volume_keyboard, build_numeric_keyboard
-from src.subscription_types import SubscriptionData
 
 
 async def show_volume(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Display volume selection menu with current selection shown."""
-    sub = get_current_subscription(context)
-    current: Optional[Decimal] = sub.volume if sub else None
+    user_data = get_user_data(context)
+    user_id = user_data.get("user_id")
+    if isinstance(user_id, int):
+        from .control_menus import _refresh_subscription_from_db
+        await _refresh_subscription_from_db(context, user_id)
 
+    sub = get_current_subscription(context)
+    is_new = bool(user_data.get("is_new", False))
+    activation_key = user_data.get("activation_key")
+
+    all_fields_set = (
+            sub is not None
+            and sub.provider
+            and sub.type_filter
+            and sub.volume is not None
+            and sub.repeat_interval is not None
+    )
+    show_confirm = bool(is_new and all_fields_set)
+
+    current = sub.volume if sub else None
     if current is not None:
         text = f"📦 Selected volume: {format(current, 'f')}\n\nSelect volume (or use Custom):"
     else:
         text = "📦 Select volume (or use Custom):"
 
-    await safe_edit(query, text, reply_markup=build_volume_keyboard(current))
+    await safe_edit(
+        query,
+        text,
+        reply_markup=build_volume_keyboard(current, show_confirm, activation_key)
+    )
     return SELECT_VOLUME
 
 
 async def _save_volume(context: ContextTypes.DEFAULT_TYPE, value: Optional[Decimal]) -> None:
-    """Save volume to DB and update cached SubscriptionData."""
     user_data = get_user_data(context)
     user_id: Optional[int] = user_data.get("user_id")
     if not user_id:
@@ -38,7 +57,6 @@ async def _save_volume(context: ContextTypes.DEFAULT_TYPE, value: Optional[Decim
 
     await save_subscription_settings(user_id=user_id, volume=value)
 
-    # Update cached SubscriptionData
     sub = get_current_subscription(context)
     if sub is not None:
         updated = SubscriptionData(
@@ -51,7 +69,6 @@ async def _save_volume(context: ContextTypes.DEFAULT_TYPE, value: Optional[Decim
         )
         user_data["current_subscription"] = updated
     else:
-        # Should not happen, but create minimal one
         user_data["current_subscription"] = SubscriptionData(
             id=0,
             chat_id=None,
@@ -63,7 +80,6 @@ async def _save_volume(context: ContextTypes.DEFAULT_TYPE, value: Optional[Decim
 
 
 async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle volume selection interactions."""
     query = update.callback_query
     if not query:
         return ConversationHandler.END
@@ -78,7 +94,6 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     action = data.split(":", 1)[1]
 
-    # ─── Custom ──────────────────────────────────────────────
     if action == "custom":
         user_data = get_user_data(context)
         user_data["num_field"] = "volume"
@@ -92,12 +107,10 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return SELECT_VOLUME
 
-    # ─── Back ─────────────────────────────────────────────────
     if action == "back":
         from .selection_handlers import show_selection
         return await show_selection(query, context, "type")
 
-    # ─── Next ─────────────────────────────────────────────────
     if action == "next":
         sub = get_current_subscription(context)
         if sub is None or sub.volume is None:
@@ -110,7 +123,6 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         from .repeat_handler import show_repeat
         return await show_repeat(query, context)
 
-    # ─── Menu ─────────────────────────────────────────────────
     if action == "menu":
         from .control_menus import show_main_menu
         return await show_main_menu(query, context)
@@ -120,10 +132,23 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         value = Decimal(action)
         await _save_volume(context, value)
 
+        user_data = get_user_data(context)
+        sub = get_current_subscription(context)
+        is_new = bool(user_data.get("is_new", False))
+        activation_key = user_data.get("activation_key")
+        all_fields_set = (
+                sub is not None
+                and sub.provider
+                and sub.type_filter
+                and sub.volume is not None
+                and sub.repeat_interval is not None
+        )
+        show_confirm = bool(is_new and all_fields_set)
+
         await safe_edit(
             query,
             f"📦 Selected volume: {value}\n\nSelect volume (or use Custom):",
-            reply_markup=build_volume_keyboard(value),
+            reply_markup=build_volume_keyboard(value, show_confirm, activation_key)
         )
         return SELECT_VOLUME
     except (ValueError, TypeError):
@@ -132,6 +157,5 @@ async def volume_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def numeric_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle numeric keypad input for volume."""
     from .common import handle_numeric_input
     return await handle_numeric_input(update, context, "volume", SELECT_VOLUME, allow_decimal=True)

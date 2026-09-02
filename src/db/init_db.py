@@ -34,10 +34,7 @@ async def init_db() -> None:
                                    volume          DECIMAL,
                                    repeat_interval INTEGER,
                                    last_sent_at    BIGINT,        -- minutes since epoch
-                                   activation_key  TEXT UNIQUE,   -- NULL when active
-                                   expires_at      BIGINT,        -- seconds since epoch, NULL when active
-                                   created_at      TIMESTAMPTZ DEFAULT NOW(),
-                                   updated_at      TIMESTAMPTZ DEFAULT NOW()
+                                   activation_key  TEXT UNIQUE    -- NULL when active
                                )
                                """)
             logger.info("subscriptions table ready (created if not existed)")

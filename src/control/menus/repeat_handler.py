@@ -9,6 +9,7 @@ from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes, ConversationHandler
 
 from db.subscription_repository import save_subscription_settings
+from src.subscription_types import SubscriptionData
 from .common import (
     safe_edit,
     get_user_data,
@@ -17,29 +18,44 @@ from .common import (
     get_current_subscription,
 )
 from .menus import build_repeat_keyboard, build_numeric_keyboard
-from src.subscription_types import SubscriptionData
 
 
 async def show_repeat(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Display repeat interval selection menu with current selection shown."""
     user_data = get_user_data(context)
+    user_id = user_data.get("user_id")
+    if isinstance(user_id, int):
+        from .control_menus import _refresh_subscription_from_db
+        await _refresh_subscription_from_db(context, user_id)
+
     sub = get_current_subscription(context)
-    is_new = user_data.get("is_new", False)
+    is_new = bool(user_data.get("is_new", False))
+    activation_key = user_data.get("activation_key")
 
-    current: Optional[int] = sub.repeat_interval if sub else None
+    all_fields_set = (
+            sub is not None
+            and sub.provider
+            and sub.type_filter
+            and sub.volume is not None
+            and sub.repeat_interval is not None
+    )
+    show_confirm = bool(is_new and all_fields_set)
 
+    current = sub.repeat_interval if sub else None
     if current is not None:
         label = f"{current}m"
         text = f"⏱️ Selected interval: {label}\n\nSelect interval (or use Custom):"
     else:
         text = "⏱️ Select interval (or use Custom):"
 
-    await safe_edit(query, text, reply_markup=build_repeat_keyboard(current, show_next=is_new))
+    await safe_edit(
+        query,
+        text,
+        reply_markup=build_repeat_keyboard(current, show_confirm, activation_key)
+    )
     return SELECT_REPEAT
 
 
 async def _save_repeat(context: ContextTypes.DEFAULT_TYPE, value: Optional[int]) -> None:
-    """Save repeat interval to DB and update user_data."""
     user_data = get_user_data(context)
     user_id: Optional[int] = user_data.get("user_id")
     if not user_id:
@@ -47,7 +63,6 @@ async def _save_repeat(context: ContextTypes.DEFAULT_TYPE, value: Optional[int])
 
     await save_subscription_settings(user_id=user_id, repeat_interval=value)
 
-    # Update cached SubscriptionData
     sub = get_current_subscription(context)
     if sub is not None:
         updated_sub = SubscriptionData(
@@ -60,7 +75,6 @@ async def _save_repeat(context: ContextTypes.DEFAULT_TYPE, value: Optional[int])
         )
         user_data["current_subscription"] = updated_sub
     else:
-        # Should not happen, but create a minimal one
         user_data["current_subscription"] = SubscriptionData(
             id=0,
             chat_id=None,
@@ -72,7 +86,6 @@ async def _save_repeat(context: ContextTypes.DEFAULT_TYPE, value: Optional[int])
 
 
 async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle repeat interval selection interactions."""
     query = update.callback_query
     if not query:
         return ConversationHandler.END
@@ -87,9 +100,7 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     action = data.split(":", 1)[1]
     user_data = get_user_data(context)
-    is_new = user_data.get("is_new", False)
 
-    # ─── Custom ──────────────────────────────────────────────
     if action == "custom":
         user_data["num_field"] = "repeat"
         user_data["num_buffer"] = ""
@@ -102,12 +113,10 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return SELECT_REPEAT
 
-    # ─── Back ─────────────────────────────────────────────────
     if action == "back":
         from .volume_handler import show_volume
         return await show_volume(query, context)
 
-    # ─── Next ─────────────────────────────────────────────────
     if action == "next":
         sub = get_current_subscription(context)
         current = sub.repeat_interval if sub else None
@@ -116,14 +125,13 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await safe_edit(
                 query,
                 "❌ Please select an interval or use 'Custom'.",
-                reply_markup=build_repeat_keyboard(None, show_next=True),
+                reply_markup=build_repeat_keyboard(None),
             )
             return SELECT_REPEAT
 
-        from .confirm_handler import show_confirm
-        return await show_confirm(query, context)
+        from .selection_handlers import show_selection
+        return await show_selection(query, context, "prov")
 
-    # ─── Menu ─────────────────────────────────────────────────
     if action == "menu":
         from .control_menus import show_main_menu
         return await show_main_menu(query, context)
@@ -133,11 +141,24 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         minutes = int(action)
         await _save_repeat(context, minutes)
 
+        user_data = get_user_data(context)
+        sub = get_current_subscription(context)
+        is_new = bool(user_data.get("is_new", False))
+        activation_key = user_data.get("activation_key")
+        all_fields_set = (
+                sub is not None
+                and sub.provider
+                and sub.type_filter
+                and sub.volume is not None
+                and sub.repeat_interval is not None
+        )
+        show_confirm = bool(is_new and all_fields_set)
+
         label = f"{minutes}m"
         await safe_edit(
             query,
             f"⏱️ Selected interval: {label}\n\nSelect interval (or use Custom):",
-            reply_markup=build_repeat_keyboard(minutes, show_next=is_new),
+            reply_markup=build_repeat_keyboard(minutes, show_confirm, activation_key)
         )
         return SELECT_REPEAT
     except (ValueError, TypeError):
@@ -146,7 +167,6 @@ async def repeat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def numeric_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle numeric keypad input for repeat interval."""
     return await handle_numeric_input(
         update,
         context,

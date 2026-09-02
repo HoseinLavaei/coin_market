@@ -40,7 +40,7 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     data = await claim_subscription_by_key(key, chat_id)
     if data is None:
         await message.reply_text(
-            "❌ Invalid or expired key. Please request a new one from the Control Bot."
+            "❌ Invalid key. Please request a new one from the Control Bot."
         )
         return
 

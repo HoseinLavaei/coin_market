@@ -9,10 +9,10 @@ from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes, ConversationHandler
 
 from db.subscription_repository import save_subscription_settings
+from src.subscription_types import SubscriptionData
 from .common import safe_edit, get_user_data, SELECT_PROVIDER, SELECT_TYPE, SELECT_VOLUME, get_current_subscription
 from .menus import build_provider_keyboard, build_type_keyboard
 from ...coins import ProviderName
-from src.subscription_types import SubscriptionData
 
 
 # ─── Internal helpers ──────────────────────────────────────
@@ -42,7 +42,6 @@ def _get_config(prefix: str) -> dict:
 
 
 def _get_current_values(sub: Optional[SubscriptionData], field: str) -> list[str]:
-    """Get current values from SubscriptionData."""
     if sub is None:
         return []
     if field == "provider":
@@ -61,14 +60,36 @@ def _render_text(_field: str, items: list[str], label: str) -> str:
 # ─── Shared display updater ──────────────────────────────────
 
 async def _update_selection_display(
-    query: CallbackQuery,
-    _context: ContextTypes.DEFAULT_TYPE,
-    config: dict,
-    items: list[str],
+        query: CallbackQuery,
+        context: ContextTypes.DEFAULT_TYPE,
+        config: dict,
+        items: list[str],
 ) -> int:
-    """Update the selection message with current items and return the state."""
+    user_data = get_user_data(context)
+    user_id = user_data.get("user_id")
+    if isinstance(user_id, int):
+        from .control_menus import _refresh_subscription_from_db
+        await _refresh_subscription_from_db(context, user_id)
+
+    sub = get_current_subscription(context)
+    is_new = bool(user_data.get("is_new", False))
+    activation_key = user_data.get("activation_key")
+
+    all_fields_set = (
+            sub is not None
+            and sub.provider
+            and sub.type_filter
+            and sub.volume is not None
+            and sub.repeat_interval is not None
+    )
+    show_confirm = bool(is_new and all_fields_set)
+
     text = _render_text(config["field"], items, config["label"])
-    await safe_edit(query, text, reply_markup=config["builder"](items))
+    await safe_edit(
+        query,
+        text,
+        reply_markup=config["builder"](items, show_confirm, activation_key)
+    )
     return config["state"]
 
 
@@ -79,6 +100,12 @@ async def show_selection(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
     if not config:
         return ConversationHandler.END
 
+    user_data = get_user_data(context)
+    user_id = user_data.get("user_id")
+    if isinstance(user_id, int):
+        from .control_menus import _refresh_subscription_from_db
+        await _refresh_subscription_from_db(context, user_id)
+
     sub = get_current_subscription(context)
     items = _get_current_values(sub, config["field"])
     return await _update_selection_display(query, context, config, items)
@@ -87,19 +114,15 @@ async def show_selection(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
 # ─── Handlers for specific actions ──────────────────────────
 
 async def _save_to_db(context: ContextTypes.DEFAULT_TYPE, save_field: str, value: Optional[str]) -> None:
-    """Save a single field to the database and update cached SubscriptionData."""
     user_data = get_user_data(context)
     user_id = user_data.get("user_id")
     if not isinstance(user_id, int):
         return
 
-    # Save to DB
     await save_subscription_settings(user_id=user_id, **{save_field: value})
 
-    # Update cached SubscriptionData
     sub = get_current_subscription(context)
     if sub is not None:
-        # Build updated object
         if save_field == "provider":
             updated = SubscriptionData(
                 id=sub.id,
@@ -164,7 +187,6 @@ async def _handle_clear(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE, prefix: str) -> int:
-    """Handle Back button (only for types, providers has no Back)."""
     config = _get_config(prefix)
     if not config:
         return ConversationHandler.END
@@ -174,8 +196,8 @@ async def _handle_back(update: Update, context: ContextTypes.DEFAULT_TYPE, prefi
         return ConversationHandler.END
 
     if prefix == "prov":
-        from .control_menus import show_main_menu
-        return await show_main_menu(query, context)
+        from .repeat_handler import show_repeat
+        return await show_repeat(query, context)
     else:
         return await show_selection(query, context, "prov")
 
@@ -208,7 +230,6 @@ async def _handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE, prefi
 
 
 async def _handle_menu(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Return to main menu."""
     from .control_menus import show_main_menu
     return await show_main_menu(query, context)
 
@@ -216,10 +237,6 @@ async def _handle_menu(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE)
 # ─── Main callback router ────────────────────────────────────
 
 async def selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Generic handler for provider and type selection.
-    Routes to specific helpers based on the callback data.
-    """
     query = update.callback_query
     if not query:
         return ConversationHandler.END

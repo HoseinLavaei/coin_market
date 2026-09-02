@@ -8,11 +8,11 @@ from typing import Optional, cast, Any
 from sqlalchemy import create_engine, select, update, delete, text
 from sqlalchemy.orm import sessionmaker
 
-from .database import AsyncSessionLocal
-from .helpers import now_minutes, now_seconds
-from .models import Subscription
 from src.environment import DATABASE_URL
 from src.subscription_types import SubscriptionData
+from .database import AsyncSessionLocal
+from .helpers import now_minutes
+from .models import Subscription
 
 
 # ─── Async versions (for bots) ──────────────────────────────
@@ -40,12 +40,10 @@ async def get_active_subscription_for_user(user_id: int) -> Optional[Subscriptio
 
 async def get_pending_by_key(key: str) -> Optional[Subscription]:
     """Fetch a pending subscription by its activation key (still valid)."""
-    now = now_seconds()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Subscription).where(
                 Subscription.activation_key == key,
-                Subscription.expires_at > now,
                 Subscription.chat_id.is_(None)
             )
         )
@@ -59,7 +57,6 @@ async def create_or_replace_pending(
         volume: Decimal | None,
         repeat_interval: int | None,
         key: str,
-        expires_at: int,
 ) -> Subscription:
     """
     Create a new pending subscription, or replace an existing one (active or pending)
@@ -79,7 +76,6 @@ async def create_or_replace_pending(
             existing.repeat_interval = repeat_interval
             existing.last_sent_at = None
             existing.activation_key = key
-            existing.expires_at = expires_at
             await session.commit()
             await session.refresh(existing)
             return cast(Subscription, existing)
@@ -93,7 +89,6 @@ async def create_or_replace_pending(
                 repeat_interval=repeat_interval,
                 last_sent_at=None,
                 activation_key=key,
-                expires_at=expires_at,
             )
             session.add(new_sub)
             await session.commit()
@@ -106,11 +101,9 @@ async def claim_subscription_by_key(key: str, chat_id: int) -> dict[str, Any] | 
     Claim a pending subscription by key.
     Returns the subscription data needed to send the first update, or None if invalid.
     """
-    now = now_seconds()
     async with AsyncSessionLocal() as session:
         stmt = select(Subscription).where(
             Subscription.activation_key == key,
-            Subscription.expires_at > now,
             Subscription.chat_id.is_(None)
         ).with_for_update()
         result = await session.execute(stmt)
@@ -121,7 +114,6 @@ async def claim_subscription_by_key(key: str, chat_id: int) -> dict[str, Any] | 
 
         sub.chat_id = chat_id
         sub.activation_key = None
-        sub.expires_at = None
         sub.last_sent_at = None
         await session.commit()
         await session.refresh(sub)
@@ -276,7 +268,6 @@ async def save_subscription_settings(
                 repeat_interval=1,  # default
                 last_sent_at=None,
                 activation_key=None,
-                expires_at=None,
             )
             session.add(sub)
         else:

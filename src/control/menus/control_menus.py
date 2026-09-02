@@ -3,11 +3,14 @@ Control Bot conversation handler.
 Dashboard‑style main menu with auto‑save.
 """
 
+import secrets
+
 from telegram import Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ConversationHandler
 
-from db.subscription_repository import save_subscription_settings
+from db.subscription_repository import create_or_replace_pending
 from src import logger
+from src.subscription_types import SubscriptionData
 from .common import (
     safe_edit,
     get_user_data,
@@ -16,10 +19,8 @@ from .common import (
     SELECT_TYPE,
     SELECT_VOLUME,
     SELECT_REPEAT,
-    CONFIRM,
     get_current_subscription,
 )
-from .confirm_handler import confirm_callback, perform_activation
 from .menus import build_main_menu_keyboard, build_provider_keyboard
 from .repeat_handler import repeat_callback, numeric_callback as repeat_numeric_callback
 from .repeat_handler import show_repeat
@@ -27,7 +28,30 @@ from .selection_handlers import selection_callback
 from .volume_handler import show_volume
 from .volume_handler import volume_callback, numeric_callback as volume_numeric_callback
 from ...db import get_subscription_for_user
-from src.subscription_types import SubscriptionData
+
+
+# ─── Helper to refresh subscription from DB ───────────────────
+
+async def _refresh_subscription_from_db(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
+    """Refresh the cached subscription data from the database."""
+    sub_orm = await get_subscription_for_user(user_id)
+    user_data = get_user_data(context)
+    if sub_orm:
+        sub_data = SubscriptionData(
+            id=sub_orm.id,
+            chat_id=sub_orm.chat_id,
+            provider=sub_orm.provider,
+            type_filter=sub_orm.type_filter,
+            volume=sub_orm.volume,
+            repeat_interval=sub_orm.repeat_interval,
+        )
+        user_data["current_subscription"] = sub_data
+        user_data["is_new"] = sub_orm.chat_id is None
+        if sub_orm.activation_key:
+            user_data["activation_key"] = sub_orm.activation_key
+    else:
+        user_data["current_subscription"] = None
+        user_data["is_new"] = True
 
 
 # ─── Helper to build main menu text ────────────────────────
@@ -54,23 +78,43 @@ def _build_main_menu_text(sub: SubscriptionData | None) -> str:
     )
 
 
+def _should_show_confirm(sub: SubscriptionData | None, is_new: bool) -> bool:
+    if not is_new or sub is None:
+        return False
+    return (
+            sub.provider is not None
+            and sub.type_filter is not None
+            and sub.volume is not None
+            and sub.repeat_interval is not None
+    )
+
+
 # ─── Helper to show main menu ─────────────────────────────
 
 async def show_main_menu(query, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Display the main menu with current settings."""
     user_data = get_user_data(context)
+    user_id = user_data.get("user_id")
+    if isinstance(user_id, int):
+        await _refresh_subscription_from_db(context, user_id)
+
     sub = get_current_subscription(context)
-    is_new = user_data.get("is_new", False)
+    is_new = bool(user_data.get("is_new", False))
+    show_confirm = _should_show_confirm(sub, is_new)
+    activation_key = user_data.get("activation_key")
 
     text = _build_main_menu_text(sub)
-    await safe_edit(query, text, reply_markup=build_main_menu_keyboard(show_done=is_new), parse_mode="HTML")
+    await safe_edit(
+        query,
+        text,
+        reply_markup=build_main_menu_keyboard(show_confirm, activation_key),
+        parse_mode="HTML"
+    )
     return MAIN_MENU
 
 
 # ─── Numeric Wrappers ──────────────────────────────────────
 
 async def _volume_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper for volume numeric callback to stay in correct state."""
     result = await volume_numeric_callback(update, context)
     if result == ConversationHandler.END:
         query = update.callback_query
@@ -80,7 +124,6 @@ async def _volume_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def _repeat_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper for repeat numeric callback to stay in correct state."""
     result = await repeat_numeric_callback(update, context)
     if result == ConversationHandler.END:
         query = update.callback_query
@@ -92,35 +135,43 @@ async def _repeat_numeric_wrapper(update: Update, context: ContextTypes.DEFAULT_
 # ─── Entry Point ──────────────────────────────────────────
 
 async def start_subscription_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Entry point for /start and /menu.
-    Loads or creates a subscription from DB, then shows the main menu.
-    """
     user = update.effective_user
     if not user:
         return ConversationHandler.END
 
     user_id = user.id
 
-    # ─── Check if user has a subscription ──────────────────
     sub_orm = await get_subscription_for_user(user_id)
 
     if sub_orm is None:
-        # Create a new pending subscription with defaults
-        sub_orm = await save_subscription_settings(
+        activation_key = str(secrets.randbelow(1000000)).zfill(6)
+        sub_orm = await create_or_replace_pending(
             user_id=user_id,
             provider=None,
             type_filter=None,
             volume=None,
             repeat_interval=None,
-            chat_id=None,
+            key=activation_key,
         )
-        logger.info(f"Created new pending subscription for user {user_id}")
+        logger.info(f"Created new pending subscription for user {user_id} with key {activation_key}")
+    else:
+        if sub_orm.activation_key is None:
+            activation_key = str(secrets.randbelow(1000000)).zfill(6)
+            sub_orm = await create_or_replace_pending(
+                user_id=user_id,
+                provider=sub_orm.provider,
+                type_filter=sub_orm.type_filter,
+                volume=sub_orm.volume,
+                repeat_interval=sub_orm.repeat_interval,
+                key=activation_key,
+            )
+            logger.info(f"Generated key for existing pending subscription of user {user_id}")
+        else:
+            activation_key = sub_orm.activation_key
 
-    # ─── Convert ORM to SubscriptionData ────────────────────
     sub_data = SubscriptionData(
         id=sub_orm.id,
-        chat_id=sub_orm.chat_id,  # may be None
+        chat_id=sub_orm.chat_id,
         provider=sub_orm.provider,
         type_filter=sub_orm.type_filter,
         volume=sub_orm.volume,
@@ -128,70 +179,27 @@ async def start_subscription_flow(update: Update, context: ContextTypes.DEFAULT_
     )
     is_new = sub_orm.chat_id is None
 
-    # ─── Store in user_data ──────────────────────────────────
     user_data = get_user_data(context)
     user_data["user_id"] = user_id
     user_data["is_new"] = is_new
     user_data["current_subscription"] = sub_data
+    user_data["activation_key"] = activation_key
 
-    # Show main menu
     message = update.effective_message
     if message:
         text = _build_main_menu_text(sub_data)
+        show_confirm = _should_show_confirm(sub_data, is_new)
         await message.reply_text(
             text,
-            reply_markup=build_main_menu_keyboard(show_done=is_new),
+            reply_markup=build_main_menu_keyboard(show_confirm, activation_key),
             parse_mode="HTML"
         )
     return MAIN_MENU
 
 
-# ─── Validation and activation helpers ─────────────────────
-
-def _check_missing_fields(sub: SubscriptionData) -> list[str]:
-    """Return a list of missing required field names."""
-    missing = []
-    if not sub.provider:
-        missing.append("Providers")
-    if not sub.type_filter:
-        missing.append("Types")
-    if sub.volume is None:
-        missing.append("Volume")
-    if sub.repeat_interval is None:
-        missing.append("Repeat interval")
-    return missing
-
-
-async def _handle_done_action(
-        query,
-        _context: ContextTypes.DEFAULT_TYPE,
-        user_data: dict,
-        sub: SubscriptionData,
-        is_new: bool,
-) -> int:
-    """Handle the Done button for new users."""
-    if not is_new:
-        await safe_edit(query, "❌ You already have an active subscription.")
-        return MAIN_MENU
-
-    missing = _check_missing_fields(sub)
-    if missing:
-        await safe_edit(
-            query,
-            f"❌ Please set: {', '.join(missing)} before activating.",
-            reply_markup=build_main_menu_keyboard(show_done=True),
-            parse_mode="HTML"
-        )
-        return MAIN_MENU
-
-    # All fields are set, proceed to activation
-    return await perform_activation(query, user_data["user_id"], sub)
-
-
 # ─── Main Menu Callback ────────────────────────────────────
 
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle main menu button presses."""
     query = update.callback_query
     if not query:
         return MAIN_MENU
@@ -203,24 +211,28 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     action = data.split(":", 1)[1]
     user_data = get_user_data(context)
+    user_id = user_data.get("user_id")
+    if isinstance(user_id, int):
+        await _refresh_subscription_from_db(context, user_id)
+
     sub = get_current_subscription(context)
     if sub is None:
         await safe_edit(query, "❌ Subscription data not found.")
         return MAIN_MENU
 
-    is_new = user_data.get("is_new", False)
+    activation_key = user_data.get("activation_key")
 
     if action == "providers":
         selected = sub.provider.split(",") if sub.provider else []
         await safe_edit(query, "🏛️ Select providers (toggle each):",
-                        reply_markup=build_provider_keyboard(selected))
+                        reply_markup=build_provider_keyboard(selected, False, activation_key))
         return SELECT_PROVIDER
 
     if action == "types":
         from .menus import build_type_keyboard
         selected = sub.type_filter.split(",") if sub.type_filter else []
         await safe_edit(query, "📊 Select types (toggle each):",
-                        reply_markup=build_type_keyboard(selected))
+                        reply_markup=build_type_keyboard(selected, False, activation_key))
         return SELECT_TYPE
 
     if action == "volume":
@@ -229,16 +241,12 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if action == "repeat":
         return await show_repeat(query, context)
 
-    if action == "done":
-        return await _handle_done_action(query, context, user_data, sub, is_new)
-
     return MAIN_MENU
 
 
 # ─── Fallback for /cancel ──────────────────────────────────
 
 async def cancel_fallback(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Simple cancel handler that ends the conversation."""
     query = update.callback_query
     if query:
         await query.answer()
@@ -274,9 +282,6 @@ control_conversation = ConversationHandler(
         SELECT_REPEAT: [
             CallbackQueryHandler(repeat_callback, pattern="^rep:"),
             CallbackQueryHandler(_repeat_numeric_wrapper, pattern="^num:"),
-        ],
-        CONFIRM: [
-            CallbackQueryHandler(confirm_callback, pattern="^confirm:"),
         ],
     },
     fallbacks=[
