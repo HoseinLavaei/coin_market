@@ -35,7 +35,7 @@ class BitpinProvider:
         except (KeyError, ValueError, TypeError):
             return None
 
-        return Coin(
+        return Coin.new(
             provider=cls.provider_name,
             base=base,
             quote=quote,
@@ -148,7 +148,7 @@ class BitpinProvider:
                         amount_dec = Decimal(str(amount))
                     except (ValueError, TypeError):
                         continue
-                    coin = Coin(
+                    coin = Coin.new(
                         provider=cls.provider_name,
                         base=base,
                         quote=quote,
@@ -158,7 +158,10 @@ class BitpinProvider:
                         sell_fee=Decimal(0.35),
                         timestamp=now,
                     )
-                    orders.append(Order(coin=coin, quantity=amount_dec))
+                    if coin:
+                        order = Order.new(coin=coin, quantity=amount_dec)
+                        if order:
+                            orders.append(order)
                 return orders
 
             bids = build_orders(bids_raw)
@@ -166,4 +169,7 @@ class BitpinProvider:
             if not bids and not asks:
                 return None
 
-            return (quote, base), OrderBook(asks=asks, bids=bids)
+            orderbook = OrderBook.new(asks=asks, bids=bids)
+            if orderbook is None:
+                return None
+            return (quote, base), orderbook

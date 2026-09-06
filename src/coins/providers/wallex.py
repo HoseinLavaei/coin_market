@@ -36,7 +36,7 @@ class WallexProvider:
                 quantity = Decimal(str(entry["quantity"]))
             except (KeyError, ValueError, TypeError):
                 continue
-            coin = Coin(
+            coin = Coin.new(
                 provider=cls.provider_name,
                 base=base,
                 quote=quote,
@@ -46,7 +46,10 @@ class WallexProvider:
                 sell_fee=Decimal(0.3),
                 timestamp=now,
             )
-            orders.append(Order(coin=coin, quantity=quantity))
+            if coin:
+                order = Order.new(coin=coin, quantity=quantity)
+                if order:
+                    orders.append(order)
         return orders
 
     @classmethod
@@ -74,7 +77,7 @@ class WallexProvider:
             except (KeyError, ValueError, TypeError):
                 return None
 
-            coin = Coin(
+            coin = Coin.new(
                 provider=cls.provider_name,
                 base=base,
                 quote=quote,
@@ -84,6 +87,8 @@ class WallexProvider:
                 sell_fee=Decimal(0),
                 timestamp=datetime.datetime.now(datetime.timezone.utc),
             )
+            if coin is None:
+                return None
             return (quote, base), coin
 
     @classmethod
@@ -146,7 +151,10 @@ class WallexProvider:
             if not bids and not asks:
                 return None
 
-            return (quote, base), OrderBook(asks=asks, bids=bids)
+            ob = OrderBook.new(asks=asks, bids=bids)
+            if ob is None:
+                return  None
+            return (quote, base), ob
 
     @classmethod
     def _should_fetch_orderbook(cls, stats: dict[str, Any]) -> bool:

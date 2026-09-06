@@ -8,6 +8,7 @@ from ..enums import ProviderName, Quote, Base
 from ..models import OrderBooks, Coins, Coin, Order, OrderBook
 
 
+# noinspection D
 class NobitexProvider:
     """Fetches OTC and order book data from Nobitex exchange."""
     provider_name: ProviderName = ProviderName.NOBITEX
@@ -35,14 +36,14 @@ class NobitexProvider:
         except (KeyError, ValueError):
             return None
 
-        return Coin(
+        return Coin.new(
             provider=cls.provider_name,
             base=base,
             quote=quote,
             raw_buy_price=buy_price,
             raw_sell_price=sell_price,
-            buy_fee=Decimal(0),
-            sell_fee=Decimal(0),
+            buy_fee=Decimal(0.25),
+            sell_fee=Decimal(0.25),
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
 
@@ -93,6 +94,7 @@ class NobitexProvider:
                 asks_raw: list[list[Any]] = data.get("asks", [])
                 now = datetime.datetime.now(datetime.timezone.utc)
 
+                # noinspection D
                 def build_orders(raw: list[list[Any]]) -> list[Order]:
                     orders = []
                     for price, amount in raw:
@@ -101,7 +103,7 @@ class NobitexProvider:
                             amount_dec = Decimal(str(amount))
                         except (ValueError, TypeError):
                             continue
-                        coin = Coin(
+                        coin = Coin.new(
                             provider=cls.provider_name,
                             base=base,
                             quote=quote,
@@ -111,15 +113,21 @@ class NobitexProvider:
                             sell_fee=Decimal(0.25),
                             timestamp=now,
                         )
-                        orders.append(Order(coin=coin, quantity=amount_dec))
+                        if coin:
+                            order = Order.new(coin=coin, quantity=amount_dec)
+                            if order:
+                                orders.append(order)
                     return orders
 
-                bids = build_orders(bids_raw)
+                bids = build_orders(bids_raw)[::-1]
                 asks = build_orders(asks_raw)
                 if not bids and not asks:
                     return None
 
-                return (quote, base), OrderBook(asks=asks, bids=bids)
+                ob = OrderBook.new(asks=asks, bids=bids)
+                if ob is None:
+                    return None
+                return (quote, base), ob
 
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)

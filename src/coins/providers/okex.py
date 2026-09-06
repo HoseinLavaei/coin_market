@@ -33,8 +33,7 @@ class OkexProvider:
             sell_dec = Decimal(str(sell_price))
         except (ValueError, TypeError):
             return None
-
-        return Coin(
+        return Coin.new(
             provider=cls.provider_name,
             base=base,
             quote=quote,
@@ -90,7 +89,7 @@ class OkexProvider:
                 amount_dec = Decimal(str(amount))
             except (ValueError, TypeError):
                 continue
-            coin = Coin(
+            coin = Coin.new(
                 provider=cls.provider_name,
                 base=base,
                 quote=quote,
@@ -100,7 +99,10 @@ class OkexProvider:
                 sell_fee=Decimal(0.1),
                 timestamp=now,
             )
-            orders.append(Order(coin=coin, quantity=amount_dec))
+            if coin:
+                order = Order.new(coin=coin, quantity=amount_dec)
+                if order:
+                    orders.append(order)
         return orders
 
     @classmethod
@@ -135,7 +137,10 @@ class OkexProvider:
                 if not bids and not asks:
                     return None
 
-                return (quote, base), OrderBook(asks=asks, bids=bids)
+                ob = OrderBook.new(asks=asks, bids=bids)
+                if ob is None:
+                    return None
+                return (quote, base), ob
 
         tasks = [fetch_orderbook(q, b) for q in quotes for b in bases]
         results = await asyncio.gather(*tasks)

@@ -31,7 +31,7 @@ class OmpfinexProvider:
                 amount_dec = Decimal(str(amount))
             except (ValueError, TypeError):
                 continue
-            coin = Coin(
+            coin = Coin.new(
                 provider=cls.provider_name,
                 base=base,
                 quote=quote,
@@ -41,7 +41,10 @@ class OmpfinexProvider:
                 sell_fee=Decimal(0.35),
                 timestamp=now,
             )
-            orders.append(Order(coin=coin, quantity=amount_dec))
+            if coin:
+                order = Order.new(coin=coin, quantity=amount_dec)
+                if order:
+                    orders.append(order)
         return orders
 
     @classmethod
@@ -103,7 +106,10 @@ class OmpfinexProvider:
             if not bids and not asks:
                 return None
 
-            return (quote, base), OrderBook(asks=asks, bids=bids)
+            ob = OrderBook.new(asks=asks, bids=bids)
+            if ob is None:
+                return None
+            return (quote, base), ob
 
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:

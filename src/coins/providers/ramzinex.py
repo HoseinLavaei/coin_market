@@ -81,7 +81,7 @@ class RamzinexProvider:
         if base not in bases:
             return None
 
-        return Coin(
+        return Coin.new(
             provider=cls.provider_name,
             base=base,
             quote=quote,
@@ -140,7 +140,7 @@ class RamzinexProvider:
             except (ValueError, TypeError):
                 continue
 
-            coin = Coin(
+            coin = Coin.new(
                 provider=cls.provider_name,
                 base=base,
                 quote=quote,
@@ -150,7 +150,10 @@ class RamzinexProvider:
                 sell_fee=Decimal(0.25),
                 timestamp=now,
             )
-            orders.append(Order(coin=coin, quantity=amount))
+            if coin:
+                order = Order.new(coin=coin, quantity=amount)
+                if order:
+                    orders.append(order)
 
         return orders
 
@@ -214,12 +217,12 @@ class RamzinexProvider:
             return None
 
         bids_list = cls._build_order_list(buys_raw, quote, base, now)
-        asks_list = cls._build_order_list(sells_raw, quote, base, now)
+        asks_list = cls._build_order_list(sells_raw, quote, base, now)[::-1]
 
         if not bids_list and not asks_list:
             return None
 
-        return OrderBook(asks=asks_list, bids=bids_list)
+        return OrderBook.new(asks=asks_list, bids=bids_list)
 
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:

@@ -24,8 +24,7 @@ class AbanTetherProvider:
             sell_price = Decimal(str(data["sell_price"]))
         except (KeyError, ValueError, TypeError):
             return None
-
-        return Coin(
+        return Coin.new(
             provider=cls.provider_name,
             base=base,
             quote=quote,

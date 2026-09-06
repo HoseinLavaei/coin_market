@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .enums import ProviderName, Base, Quote
 from ..environment import TIMEZONE
+from src import logger
 
 
 class Coin(BaseModel):
@@ -28,6 +29,21 @@ class Coin(BaseModel):
     buy_fee: Decimal
     sell_fee: Decimal
     timestamp: datetime
+
+    @classmethod
+    def new(cls, provider:ProviderName, base:Base, quote:Quote, raw_buy_price:Decimal, raw_sell_price:Decimal, buy_fee:Decimal, sell_fee:Decimal, timestamp:datetime) -> Coin | None:
+        coin = cls(provider=provider, base=base, quote=quote, raw_buy_price=raw_buy_price, raw_sell_price=raw_sell_price, buy_fee=buy_fee, sell_fee=sell_fee, timestamp=timestamp)
+        if coin.buy_price < coin.sell_price:
+            logger.warning(f"{provider}'s buy price is lower than sell price for {base}/{quote}.")
+            return None
+        if coin.buy_price <= 0 or coin.sell_price <= 0:
+            logger.warning(f"{provider}'s buy or sell price is non-positive for {base}/{quote}.")
+            return None
+        if coin.buy_fee < 0 or coin.sell_fee < 0:
+            logger.warning(f"{provider}'s buy or sell fee is negative for {base}/{quote}.")
+            return None
+        return coin
+
 
     @property
     def buy_price(self) -> Decimal:
@@ -84,6 +100,13 @@ class Order(BaseModel):
     coin: Coin
     quantity: Decimal
 
+    @classmethod
+    def new(cls, coin: Coin, quantity: Decimal) -> Order | None:
+        if quantity <= 0:
+            logger.warning(f"{coin.provider}'s order quantity is negative.")
+            return None
+        return cls(coin=coin, quantity=quantity)
+
     def to_timezone(self) -> Order:
         """Recursively convert the order's timestamp to the configured timezone."""
         return Order(coin=self.coin.to_timezone(), quantity=self.quantity)
@@ -130,7 +153,17 @@ class OrderBook(BaseModel):
     asks: list[Order]
     bids: list[Order]
 
-    def get_by_volume(self, volume: Decimal) -> Coin:
+    @classmethod
+    def new(cls, asks:list[Order],bids:list[Order]) -> OrderBook | None:
+        if len(asks) > 1 and not all(asks[i].coin.buy_price <= asks[i+1].coin.buy_price for i in range(len(asks)-1)):
+            logger.warning(f"{asks[0].coin.provider}'s ask prices are not increasing")
+            return None
+        if len(bids) > 1 and not all(bids[i].coin.buy_price >= bids[i+1].coin.buy_price for i in range(len(bids)-1)):
+            logger.warning(f"{bids[0].coin.provider}'s bid prices are not decreasing")
+            return None
+        return cls(asks=asks, bids=bids)
+
+    def get_by_volume(self, volume: Decimal) -> Coin | None:
         """
         Return a new Coin whose buy/sell prices are the VWAP of the order book
         for the given volume.
@@ -144,7 +177,7 @@ class OrderBook(BaseModel):
         avg_sell = _calculate_weighted_average(self.bids, volume, "sell")
         first_coin = self.asks[0].coin if self.asks else self.bids[0].coin
 
-        return Coin(
+        return Coin.new(
             provider=first_coin.provider,
             base=first_coin.base,
             quote=first_coin.quote,
