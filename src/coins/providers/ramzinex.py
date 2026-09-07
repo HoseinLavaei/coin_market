@@ -95,30 +95,31 @@ class RamzinexProvider:
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
         """OTC: fetch full pairs list and parse all markets."""
-        try:
-            pairs_data = await get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
-        except (OSError, ValueError, TimeoutError):
-            return Coins()
-
-        if pairs_data.get("status") != 0:
-            return Coins()
-
-        result = Coins()
-
-        for quote in quotes:
-            currency_string = cls._get_quote_string(quote)
-            if currency_string is None:
-                continue
-
-            for market in pairs_data.get("data", []):
-                if market["quote_currency_symbol"]["en"] != currency_string:
-                    continue
-
-                coin = cls._parse_otc_market(market, quote, bases)
-                if coin:
-                    result.upsert(coin)
-
-        return result
+        return Coins()
+        # try:
+        #     pairs_data = await get_json("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs")
+        # except (OSError, ValueError, TimeoutError):
+        #     return Coins()
+        #
+        # if pairs_data.get("status") != 0:
+        #     return Coins()
+        #
+        # result = Coins()
+        #
+        # for quote in quotes:
+        #     currency_string = cls._get_quote_string(quote)
+        #     if currency_string is None:
+        #         continue
+        #
+        #     for market in pairs_data.get("data", []):
+        #         if market["quote_currency_symbol"]["en"] != currency_string:
+        #             continue
+        #
+        #         coin = cls._parse_otc_market(market, quote, bases)
+        #         if coin:
+        #             result.upsert(coin)
+        #
+        # return result
 
     # ─── Orderbook (P2P) ─────────────────────────────────────────
 

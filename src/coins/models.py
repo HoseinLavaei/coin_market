@@ -155,10 +155,10 @@ class OrderBook(BaseModel):
 
     @classmethod
     def new(cls, asks:list[Order],bids:list[Order]) -> OrderBook | None:
-        if len(asks) > 1 and not all(asks[i].coin.buy_price <= asks[i+1].coin.buy_price for i in range(len(asks)-1)):
+        if len(asks) > 1 and not all(asks[i].coin.buy_price < asks[i+1].coin.buy_price for i in range(len(asks)-1)):
             logger.warning(f"{asks[0].coin.provider}'s ask prices are not increasing")
             return None
-        if len(bids) > 1 and not all(bids[i].coin.buy_price >= bids[i+1].coin.buy_price for i in range(len(bids)-1)):
+        if len(bids) > 1 and not all(bids[i].coin.buy_price > bids[i+1].coin.buy_price for i in range(len(bids)-1)):
             logger.warning(f"{bids[0].coin.provider}'s bid prices are not decreasing")
             return None
         return cls(asks=asks, bids=bids)

@@ -39,10 +39,10 @@ class BitpinProvider:
             provider=cls.provider_name,
             base=base,
             quote=quote,
-            raw_buy_price=price * (Decimal("1") + buy_percent),
-            raw_sell_price=price * (Decimal("1") - sell_percent),
-            buy_fee=Decimal(0),
-            sell_fee=Decimal(0),
+            raw_buy_price=price,
+            raw_sell_price=price,
+            buy_fee=Decimal(buy_percent),
+            sell_fee=Decimal(sell_percent),
             timestamp=datetime.datetime.now(datetime.timezone.utc),
         )
 
