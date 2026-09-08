@@ -47,22 +47,20 @@ class OkexProvider:
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
         result = Coins()
-        semaphore = asyncio.Semaphore(5)
 
         async def fetch_otc(quote: Quote, base: Base) -> Optional[Coin]:
-            async with semaphore:
-                try:
-                    data = await get_json("https://azapi.ok-ex.io/api/v1/asset/otc/tickers")
-                except (OSError, ValueError, TimeoutError):
-                    return None
-
-                # The API returns a list of tickers
-                tickers: list[dict[str, Any]] = data if isinstance(data, list) else []
-                for ticker in tickers:
-                    coin = cls._parse_otc_ticker(ticker, base, quote)
-                    if coin:
-                        return coin
+            try:
+                data = await get_json("https://azapi.ok-ex.io/api/v1/asset/otc/tickers")
+            except (OSError, ValueError, TimeoutError):
                 return None
+
+            # The API returns a list of tickers
+            tickers: list[dict[str, Any]] = data if isinstance(data, list) else []
+            for ticker in tickers:
+                coin = cls._parse_otc_ticker(ticker, base, quote)
+                if coin:
+                    return coin
+            return None
 
         tasks = [fetch_otc(q, b) for q in quotes for b in bases]
         results = await asyncio.gather(*tasks)
@@ -108,7 +106,6 @@ class OkexProvider:
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
         result = OrderBooks()
-        semaphore = asyncio.Semaphore(5)
 
         async def fetch_orderbook(
                 quote: Quote,
@@ -117,30 +114,29 @@ class OkexProvider:
             quote_str = "IRT" if quote == Quote.TMN else str(quote.value)
             symbol = f"{base.value}-{quote_str}"
 
-            async with semaphore:
-                try:
-                    data = await get_json(
-                        "https://sapi.ok-ex.io/api/v1/spot/public/books",
-                        {"symbol": symbol, "limit": "20"},
-                    )
-                except (OSError, ValueError, TimeoutError):
-                    return None
+            try:
+                data = await get_json(
+                    "https://sapi.ok-ex.io/api/v1/spot/public/books",
+                    {"symbol": symbol, "limit": "20"},
+                )
+            except (OSError, ValueError, TimeoutError):
+                return None
 
-                bids_raw: list[list[Any]] = data.get("bids", [])
-                asks_raw: list[list[Any]] = data.get("asks", [])
-                if not bids_raw and not asks_raw:
-                    return None
+            bids_raw: list[list[Any]] = data.get("bids", [])
+            asks_raw: list[list[Any]] = data.get("asks", [])
+            if not bids_raw and not asks_raw:
+                return None
 
-                now = datetime.datetime.now(datetime.timezone.utc)
-                bids = cls._build_orders(bids_raw, quote, base, now)
-                asks = cls._build_orders(asks_raw, quote, base, now)
-                if not bids and not asks:
-                    return None
+            now = datetime.datetime.now(datetime.timezone.utc)
+            bids = cls._build_orders(bids_raw, quote, base, now)
+            asks = cls._build_orders(asks_raw, quote, base, now)
+            if not bids and not asks:
+                return None
 
-                ob = OrderBook.new(asks=asks, bids=bids)
-                if ob is None:
-                    return None
-                return (quote, base), ob
+            ob = OrderBook.new(asks=asks, bids=bids)
+            if ob is None:
+                return None
+            return (quote, base), ob
 
         tasks = [fetch_orderbook(q, b) for q in quotes for b in bases]
         results = await asyncio.gather(*tasks)

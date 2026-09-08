@@ -77,39 +77,37 @@ class OmpfinexProvider:
     @classmethod
     async def _fetch_single_orderbook(
             cls,
-            semaphore: asyncio.Semaphore,
             market_id: int,
             base: Base,
             quote: Quote,
     ) -> Optional[tuple[tuple[Quote, Base], OrderBook]]:
-        async with semaphore:
-            try:
-                data = await get_json(
-                    f"https://api.ompfinex.com/v1/market/{market_id}/depth",
-                    {"limit": "1000000"},
-                )
-            except (OSError, ValueError, TimeoutError):
-                return None
+        try:
+            data = await get_json(
+                f"https://api.ompfinex.com/v1/market/{market_id}/depth",
+                {"limit": "1000000"},
+            )
+        except (OSError, ValueError, TimeoutError):
+            return None
 
-            if data.get("status") != "OK":
-                return None
+        if data.get("status") != "OK":
+            return None
 
-            result_data = data.get("data", {})
-            bids_raw: list[list[Any]] = result_data.get("bids", [])
-            asks_raw: list[list[Any]] = result_data.get("asks", [])
-            if not bids_raw and not asks_raw:
-                return None
+        result_data = data.get("data", {})
+        bids_raw: list[list[Any]] = result_data.get("bids", [])
+        asks_raw: list[list[Any]] = result_data.get("asks", [])
+        if not bids_raw and not asks_raw:
+            return None
 
-            now = datetime.datetime.now(datetime.timezone.utc)
-            bids = cls._build_orders(bids_raw, quote, base, now)
-            asks = cls._build_orders(asks_raw, quote, base, now)
-            if not bids and not asks:
-                return None
+        now = datetime.datetime.now(datetime.timezone.utc)
+        bids = cls._build_orders(bids_raw, quote, base, now)
+        asks = cls._build_orders(asks_raw, quote, base, now)
+        if not bids and not asks:
+            return None
 
-            ob = OrderBook.new(asks=asks, bids=bids)
-            if ob is None:
-                return None
-            return (quote, base), ob
+        ob = OrderBook.new(asks=asks, bids=bids)
+        if ob is None:
+            return None
+        return (quote, base), ob
 
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
@@ -117,7 +115,6 @@ class OmpfinexProvider:
         if not market_map:
             return OrderBooks()
 
-        semaphore = asyncio.Semaphore(5)
         tasks = []
 
         for quote in quotes:
@@ -128,7 +125,7 @@ class OmpfinexProvider:
             for base in bases:
                 market_id = market_map.get((quote_id, base.value))
                 if market_id is not None:
-                    tasks.append(cls._fetch_single_orderbook(semaphore, market_id, base, quote))
+                    tasks.append(cls._fetch_single_orderbook(market_id, base, quote))
 
         results = await asyncio.gather(*tasks)
         final_result = OrderBooks()

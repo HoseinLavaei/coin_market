@@ -76,7 +76,6 @@ class NobitexProvider:
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
         result = OrderBooks()
-        semaphore = asyncio.Semaphore(5)
 
         async def fetch_pair(
                 quote: Quote,
@@ -85,49 +84,48 @@ class NobitexProvider:
             quote_str = "IRT" if quote == Quote.TMN else "USDT"
             pair = f"{base.value}{quote_str}"
 
-            async with semaphore:
-                data = await get_json(f"https://apiv2.nobitex.ir/v2/depth/{pair}")
-                if data.get("status") != "ok":
-                    return None
+            data = await get_json(f"https://apiv2.nobitex.ir/v2/depth/{pair}")
+            if data.get("status") != "ok":
+                return None
 
-                bids_raw: list[list[Any]] = data.get("bids", [])
-                asks_raw: list[list[Any]] = data.get("asks", [])
-                now = datetime.datetime.now(datetime.timezone.utc)
+            bids_raw: list[list[Any]] = data.get("bids", [])
+            asks_raw: list[list[Any]] = data.get("asks", [])
+            now = datetime.datetime.now(datetime.timezone.utc)
 
-                # noinspection D
-                def build_orders(raw: list[list[Any]]) -> list[Order]:
-                    orders = []
-                    for price, amount in raw:
-                        try:
-                            price_dec = Decimal(str(price)) / 10
-                            amount_dec = Decimal(str(amount))
-                        except (ValueError, TypeError):
-                            continue
-                        coin = Coin.new(
-                            provider=cls.provider_name,
-                            base=base,
-                            quote=quote,
-                            raw_buy_price=price_dec,
-                            raw_sell_price=price_dec,
-                            buy_fee=Decimal(0.25),
-                            sell_fee=Decimal(0.25),
-                            timestamp=now,
-                        )
-                        if coin:
-                            order = Order.new(coin=coin, quantity=amount_dec)
-                            if order:
-                                orders.append(order)
-                    return orders
+            # noinspection D
+            def build_orders(raw: list[list[Any]]) -> list[Order]:
+                orders = []
+                for price, amount in raw:
+                    try:
+                        price_dec = Decimal(str(price)) / 10
+                        amount_dec = Decimal(str(amount))
+                    except (ValueError, TypeError):
+                        continue
+                    coin = Coin.new(
+                        provider=cls.provider_name,
+                        base=base,
+                        quote=quote,
+                        raw_buy_price=price_dec,
+                        raw_sell_price=price_dec,
+                        buy_fee=Decimal(0.25),
+                        sell_fee=Decimal(0.25),
+                        timestamp=now,
+                    )
+                    if coin:
+                        order = Order.new(coin=coin, quantity=amount_dec)
+                        if order:
+                            orders.append(order)
+                return orders
 
-                bids = build_orders(bids_raw)[::-1]
-                asks = build_orders(asks_raw)
-                if not bids and not asks:
-                    return None
+            bids = build_orders(bids_raw)[::-1]
+            asks = build_orders(asks_raw)
+            if not bids and not asks:
+                return None
 
-                ob = OrderBook.new(asks=asks, bids=bids)
-                if ob is None:
-                    return None
-                return (quote, base), ob
+            ob = OrderBook.new(asks=asks, bids=bids)
+            if ob is None:
+                return None
+            return (quote, base), ob
 
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)

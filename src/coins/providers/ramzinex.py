@@ -93,7 +93,7 @@ class RamzinexProvider:
         )
 
     @classmethod
-    async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
+    async def get_otc(cls, _quotes: list[Quote], _bases: list[Base]) -> Coins:
         """OTC: fetch full pairs list and parse all markets."""
         return Coins()
         # try:

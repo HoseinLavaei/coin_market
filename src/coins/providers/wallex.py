@@ -55,41 +55,39 @@ class WallexProvider:
     @classmethod
     async def _fetch_otc_prices(
             cls,
-            sem: asyncio.Semaphore,
             symbol: str,
             base: Base,
             quote: Quote,
     ) -> Optional[tuple[tuple[Quote, Base], Coin]]:
-        async with sem:
-            try:
-                buy_task = get_json("https://api.wallex.ir/v1/otc/price", params={"symbol": symbol, "side": "BUY"})
-                sell_task = get_json("https://api.wallex.ir/v1/otc/price", params={"symbol": symbol, "side": "SELL"})
-                buy_res, sell_res = await asyncio.gather(buy_task, sell_task)
-            except (OSError, ValueError, TimeoutError):
-                return None
+        try:
+            buy_task = get_json("https://api.wallex.ir/v1/otc/price", params={"symbol": symbol, "side": "BUY"})
+            sell_task = get_json("https://api.wallex.ir/v1/otc/price", params={"symbol": symbol, "side": "SELL"})
+            buy_res, sell_res = await asyncio.gather(buy_task, sell_task)
+        except (OSError, ValueError, TimeoutError):
+            return None
 
-            if not buy_res.get("success") or not sell_res.get("success"):
-                return None
+        if not buy_res.get("success") or not sell_res.get("success"):
+            return None
 
-            try:
-                buy_price = Decimal(str(buy_res["result"]["price"]).rstrip("0").rstrip(","))
-                sell_price = Decimal(str(sell_res["result"]["price"]).rstrip("0").rstrip(","))
-            except (KeyError, ValueError, TypeError):
-                return None
+        try:
+            buy_price = Decimal(str(buy_res["result"]["price"]).rstrip("0").rstrip(","))
+            sell_price = Decimal(str(sell_res["result"]["price"]).rstrip("0").rstrip(","))
+        except (KeyError, ValueError, TypeError):
+            return None
 
-            coin = Coin.new(
-                provider=cls.provider_name,
-                base=base,
-                quote=quote,
-                raw_buy_price=buy_price,
-                raw_sell_price=sell_price,
-                buy_fee=Decimal(0),
-                sell_fee=Decimal(0),
-                timestamp=datetime.datetime.now(datetime.timezone.utc),
-            )
-            if coin is None:
-                return None
-            return (quote, base), coin
+        coin = Coin.new(
+            provider=cls.provider_name,
+            base=base,
+            quote=quote,
+            raw_buy_price=buy_price,
+            raw_sell_price=sell_price,
+            buy_fee=Decimal(0),
+            sell_fee=Decimal(0),
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
+        )
+        if coin is None:
+            return None
+        return (quote, base), coin
 
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
@@ -99,7 +97,6 @@ class WallexProvider:
             return Coins()
 
         symbols: dict[str, Any] = markets_data.get("result", {})
-        semaphore = asyncio.Semaphore(5)
         tasks = []
 
         for quote in quotes:
@@ -110,7 +107,7 @@ class WallexProvider:
             for base in bases:
                 symbol_name = f"{base.value}{quote_string}"
                 if symbol_name in symbols:
-                    tasks.append(cls._fetch_otc_prices(semaphore, symbol_name, base, quote))
+                    tasks.append(cls._fetch_otc_prices(symbol_name, base, quote))
 
         results = await asyncio.gather(*tasks)
         result = Coins()
@@ -125,36 +122,34 @@ class WallexProvider:
     @classmethod
     async def _fetch_single_orderbook(
             cls,
-            sem: asyncio.Semaphore,
             market_key: str,
             base: Base,
             quote: Quote,
     ) -> Optional[tuple[tuple[Quote, Base], OrderBook]]:
-        async with sem:
-            try:
-                data = await get_json("https://api.wallex.ir/v1/depth", params={"symbol": market_key})
-            except (OSError, ValueError, TimeoutError):
-                return None
+        try:
+            data = await get_json("https://api.wallex.ir/v1/depth", params={"symbol": market_key})
+        except (OSError, ValueError, TimeoutError):
+            return None
 
-            if not data.get("success"):
-                return None
+        if not data.get("success"):
+            return None
 
-            result_data = data.get("result", {})
-            bids_raw: list[dict[str, Any]] = result_data.get("bid", [])
-            asks_raw: list[dict[str, Any]] = result_data.get("ask", [])
-            if not bids_raw and not asks_raw:
-                return None
+        result_data = data.get("result", {})
+        bids_raw: list[dict[str, Any]] = result_data.get("bid", [])
+        asks_raw: list[dict[str, Any]] = result_data.get("ask", [])
+        if not bids_raw and not asks_raw:
+            return None
 
-            now = datetime.datetime.now(datetime.timezone.utc)
-            bids = cls._build_order_list(bids_raw, quote, base, now)
-            asks = cls._build_order_list(asks_raw, quote, base, now)
-            if not bids and not asks:
-                return None
+        now = datetime.datetime.now(datetime.timezone.utc)
+        bids = cls._build_order_list(bids_raw, quote, base, now)
+        asks = cls._build_order_list(asks_raw, quote, base, now)
+        if not bids and not asks:
+            return None
 
-            ob = OrderBook.new(asks=asks, bids=bids)
-            if ob is None:
-                return  None
-            return (quote, base), ob
+        ob = OrderBook.new(asks=asks, bids=bids)
+        if ob is None:
+            return None
+        return (quote, base), ob
 
     @classmethod
     def _should_fetch_orderbook(cls, stats: dict[str, Any]) -> bool:
@@ -164,7 +159,6 @@ class WallexProvider:
     @classmethod
     def _build_orderbook_tasks(
             cls,
-            sem: asyncio.Semaphore,
             symbols: dict[str, Any],
             quotes: list[Quote],
             bases: list[Base],
@@ -180,7 +174,7 @@ class WallexProvider:
                 if market_key in symbols:
                     stats = symbols[market_key].get("stats", {})
                     if cls._should_fetch_orderbook(stats):
-                        tasks.append(cls._fetch_single_orderbook(sem, market_key, base, quote))
+                        tasks.append(cls._fetch_single_orderbook(market_key, base, quote))
         return tasks
 
     @classmethod
@@ -191,9 +185,8 @@ class WallexProvider:
             return OrderBooks()
 
         symbols: dict[str, Any] = markets_data.get("result", {}).get("symbols", {})
-        semaphore = asyncio.Semaphore(5)
 
-        tasks = cls._build_orderbook_tasks(semaphore, symbols, quotes, bases)
+        tasks = cls._build_orderbook_tasks(symbols, quotes, bases)
         results = await asyncio.gather(*tasks)
 
         final_result = OrderBooks()

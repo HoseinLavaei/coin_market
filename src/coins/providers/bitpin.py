@@ -86,7 +86,6 @@ class BitpinProvider:
         if not market_map:
             return OrderBooks()
 
-        semaphore = asyncio.Semaphore(10)
         tasks = []
 
         for quote in quotes:
@@ -98,7 +97,7 @@ class BitpinProvider:
                 market_id = market_map.get((quote_string, base.value))
                 if market_id is not None:
                     tasks.append(
-                        cls._fetch_orderbook(market_id, base, quote, semaphore)
+                        cls._fetch_orderbook(market_id, base, quote)
                     )
 
         results = await asyncio.gather(*tasks)
@@ -130,46 +129,44 @@ class BitpinProvider:
             market_id: int,
             base: Base,
             quote: Quote,
-            semaphore: asyncio.Semaphore,
     ) -> Optional[tuple[tuple[Quote, Base], OrderBook]]:
-        async with semaphore:
-            url = f"https://api.bitpin.ir/v4/mth/orderbook/{market_id}/"
-            data = await get_json(url)
+        url = f"https://api.bitpin.ir/v4/mth/orderbook/{market_id}/"
+        data = await get_json(url)
 
-            bids_raw: list[list[Any]] = data.get("bids", [])
-            asks_raw: list[list[Any]] = data.get("asks", [])
-            now = datetime.datetime.now(datetime.timezone.utc)
+        bids_raw: list[list[Any]] = data.get("bids", [])
+        asks_raw: list[list[Any]] = data.get("asks", [])
+        now = datetime.datetime.now(datetime.timezone.utc)
 
-            def build_orders(raw: list[list[Any]]) -> list[Order]:
-                orders = []
-                for price, amount in raw:
-                    try:
-                        price_dec = Decimal(str(price))
-                        amount_dec = Decimal(str(amount))
-                    except (ValueError, TypeError):
-                        continue
-                    coin = Coin.new(
-                        provider=cls.provider_name,
-                        base=base,
-                        quote=quote,
-                        raw_buy_price=price_dec,
-                        raw_sell_price=price_dec,
-                        buy_fee=Decimal(0.35),
-                        sell_fee=Decimal(0.35),
-                        timestamp=now,
-                    )
-                    if coin:
-                        order = Order.new(coin=coin, quantity=amount_dec)
-                        if order:
-                            orders.append(order)
-                return orders
+        def build_orders(raw: list[list[Any]]) -> list[Order]:
+            orders = []
+            for price, amount in raw:
+                try:
+                    price_dec = Decimal(str(price))
+                    amount_dec = Decimal(str(amount))
+                except (ValueError, TypeError):
+                    continue
+                coin = Coin.new(
+                    provider=cls.provider_name,
+                    base=base,
+                    quote=quote,
+                    raw_buy_price=price_dec,
+                    raw_sell_price=price_dec,
+                    buy_fee=Decimal(0.35),
+                    sell_fee=Decimal(0.35),
+                    timestamp=now,
+                )
+                if coin:
+                    order = Order.new(coin=coin, quantity=amount_dec)
+                    if order:
+                        orders.append(order)
+            return orders
 
-            bids = build_orders(bids_raw)
-            asks = build_orders(asks_raw)
-            if not bids and not asks:
-                return None
+        bids = build_orders(bids_raw)
+        asks = build_orders(asks_raw)
+        if not bids and not asks:
+            return None
 
-            orderbook = OrderBook.new(asks=asks, bids=bids)
-            if orderbook is None:
-                return None
-            return (quote, base), orderbook
+        orderbook = OrderBook.new(asks=asks, bids=bids)
+        if orderbook is None:
+            return None
+        return (quote, base), orderbook

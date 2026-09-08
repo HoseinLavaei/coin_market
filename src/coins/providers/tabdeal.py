@@ -64,7 +64,6 @@ class TabdealProvider:
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
         result = OrderBooks()
-        semaphore = asyncio.Semaphore(5)
 
         async def fetch_pair(
                 quote: Quote,
@@ -77,27 +76,26 @@ class TabdealProvider:
             url = "https://api1.tabdeal.org/r/api/v1/depth"
             params = {"symbol": symbol}
 
-            async with semaphore:
-                try:
-                    data = await get_json(url, params=params)
-                except (OSError, ValueError, TimeoutError):
-                    return None
+            try:
+                data = await get_json(url, params=params)
+            except (OSError, ValueError, TimeoutError):
+                return None
 
-                asks_raw: list[list[Any]] = data.get("asks", [])
-                bids_raw: list[list[Any]] = data.get("bids", [])
-                if not asks_raw and not bids_raw:
-                    return None
+            asks_raw: list[list[Any]] = data.get("asks", [])
+            bids_raw: list[list[Any]] = data.get("bids", [])
+            if not asks_raw and not bids_raw:
+                return None
 
-                now = datetime.datetime.now(datetime.timezone.utc)
-                bids = cls._build_order_list(bids_raw, quote, base, now, reverse=True)
-                asks = cls._build_order_list(asks_raw, quote, base, now, reverse=False)
-                if not bids and not asks:
-                    return None
+            now = datetime.datetime.now(datetime.timezone.utc)
+            bids = cls._build_order_list(bids_raw, quote, base, now, reverse=True)
+            asks = cls._build_order_list(asks_raw, quote, base, now, reverse=False)
+            if not bids and not asks:
+                return None
 
-                ob = OrderBook.new(asks=asks, bids=bids)
-                if ob is None:
-                    return None
-                return (quote, base), ob
+            ob = OrderBook.new(asks=asks, bids=bids)
+            if ob is None:
+                return None
+            return (quote, base), ob
 
         tasks = [fetch_pair(q, b) for q in quotes for b in bases]
         results = await asyncio.gather(*tasks)

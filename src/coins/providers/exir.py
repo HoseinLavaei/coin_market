@@ -51,7 +51,6 @@ class ExirProvider:
     @classmethod
     async def get_otc(cls, quotes: list[Quote], bases: list[Base]) -> Coins:
         result = Coins()
-        semaphore = asyncio.Semaphore(5)
 
         async def fetch_otc(quote: Quote, base: Base) -> Optional[Coin]:
             quote_str = cls._get_quote_string(quote)
@@ -62,12 +61,11 @@ class ExirProvider:
                 "quote": quote_str,
                 "assets": base.value.lower(),
             }
-            async with semaphore:
-                try:
-                    data = await get_json("https://api.exir.io/v2/oracle/prices", params=params)
-                except (OSError, ValueError, TimeoutError):
-                    return None
-                return cls._parse_otc_response(data, quote, base)
+            try:
+                data = await get_json("https://api.exir.io/v2/oracle/prices", params=params)
+            except (OSError, ValueError, TimeoutError):
+                return None
+            return cls._parse_otc_response(data, quote, base)
 
         tasks = [fetch_otc(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)
@@ -113,7 +111,6 @@ class ExirProvider:
     @classmethod
     async def get_orderbook(cls, quotes: list[Quote], bases: list[Base]) -> OrderBooks:
         result = OrderBooks()
-        semaphore = asyncio.Semaphore(2)
 
         async def fetch_pair(quote: Quote, base: Base) -> Optional[tuple[tuple[Quote, Base], OrderBook]]:
             quote_str = cls._get_quote_string(quote)
@@ -121,30 +118,29 @@ class ExirProvider:
                 return None
             pair_name = f"{base.value.lower()}-{quote_str}"
 
-            async with semaphore:
-                try:
-                    data = await get_json("https://api.exir.io/v2/orderbook", params={"symbol": pair_name})
-                except (OSError, ValueError, TimeoutError):
-                    return None
+            try:
+                data = await get_json("https://api.exir.io/v2/orderbook", params={"symbol": pair_name})
+            except (OSError, ValueError, TimeoutError):
+                return None
 
-                order_data = data.get(pair_name)
-                if not order_data or not isinstance(order_data, dict):
-                    return None
+            order_data = data.get(pair_name)
+            if not order_data or not isinstance(order_data, dict):
+                return None
 
-                bids_raw: list[list[Any]] = order_data.get("bids", [])
-                asks_raw: list[list[Any]] = order_data.get("asks", [])
-                if not bids_raw and not asks_raw:
-                    return None
+            bids_raw: list[list[Any]] = order_data.get("bids", [])
+            asks_raw: list[list[Any]] = order_data.get("asks", [])
+            if not bids_raw and not asks_raw:
+                return None
 
-                now = datetime.datetime.now(datetime.timezone.utc)
-                bids = cls._build_orders(bids_raw, quote, base, now)
-                asks = cls._build_orders(asks_raw, quote, base, now)
-                if not bids and not asks:
-                    return None
-                ob = OrderBook.new(asks=asks, bids=bids)
-                if ob is None:
-                    return None
-                return (quote, base), ob
+            now = datetime.datetime.now(datetime.timezone.utc)
+            bids = cls._build_orders(bids_raw, quote, base, now)
+            asks = cls._build_orders(asks_raw, quote, base, now)
+            if not bids and not asks:
+                return None
+            ob = OrderBook.new(asks=asks, bids=bids)
+            if ob is None:
+                return None
+            return (quote, base), ob
 
         tasks = [fetch_pair(quote, base) for quote in quotes for base in bases]
         results = await asyncio.gather(*tasks)
